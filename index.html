@@ -34,23 +34,20 @@
   #os h2 { font-size: 26px; font-weight: 500; letter-spacing: 3px; color: #222; }
   #fs { font-size: 52px; font-weight: 500; color: #222; }
   #os p { color: #888; font-size: 13px; }
-  #name-display {
+  #name-input {
     font-size: 22px; letter-spacing: 3px; color: #222; min-height: 36px;
-    border-bottom: 2px solid #aaa; padding: 4px 12px; min-width: 200px;
-    text-align: center; text-transform: uppercase;
+    border: none; border-bottom: 2px solid #aaa; padding: 4px 12px; width: 220px;
+    text-align: center; text-transform: uppercase; background: transparent;
+    font-family: monospace; outline: none; -webkit-user-select: text; user-select: text;
   }
-  #cursor {
-    display: inline-block; width: 2px; height: 22px; background: #222;
-    margin-left: 2px; vertical-align: middle; animation: blink 0.8s step-end infinite;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
+  #name-input::placeholder { color: #ccc; font-size: 16px; letter-spacing: 2px; }
 </style>
 </head>
 <body>
 <div id="gw">
   <div id="ns">
     <canvas id="tc" width="340" height="155" style="width:340px;max-width:100%;image-rendering:pixelated;border-radius:8px;overflow:hidden;"></canvas>
-    <div id="name-display"><span id="typed"></span><span id="cursor"></span></div>
+    <input id="name-input" type="text" maxlength="10" placeholder="ENTER NAME" autocomplete="off" autocapitalize="characters" spellcheck="false">
     <button id="sb">START</button>
     <p style="font-size:11px;color:#aaa;margin-top:4px;">HOLD to sprint close · RELEASE to BONK</p>
   </div>
@@ -75,7 +72,7 @@
 const ns=document.getElementById('ns'),gu=document.getElementById('gu'),sb=document.getElementById('sb');
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 const tc=document.getElementById('tc'),tctx=tc.getContext('2d');
-const typedEl=document.getElementById('typed');
+const nameInput=document.getElementById('name-input');
 const sv=document.getElementById('sv'),cd=document.getElementById('cd'),cv=document.getElementById('cv'),bv=document.getElementById('bv');
 const os=document.getElementById('os'),fs=document.getElementById('fs'),om=document.getElementById('om'),rb=document.getElementById('rb');
 
@@ -85,7 +82,7 @@ let score,combo,bgX,spd,shakeT,bonkTexts,particles,floaties;
 let runFrame,runTimer,hitReact,hitT,hitAnim;
 let chaserSwing,chaserSwingT,gameRunning,gap,chaserX;
 let spaceHeld=false,touchHeld=false;
-let titleFrame=0,titleTimer=0,onTitleScreen=true,typedName='';
+let titleFrame=0,titleTimer=0,onTitleScreen=true;
 
 const FUNNY=[
   'OW!!','MY SPINE!','NOT THE FACE!','HELP!!!','MOM!!!',
@@ -190,7 +187,8 @@ function animateTitleScreen(){
 // ─── Game init ───────────────────────────────────────────────────────────────
 function startGame(){
   onTitleScreen=false;
-  pName=typedName.trim()||'VICTIM';
+  pName=(nameInput.value.trim()||'VICTIM').toUpperCase();
+  nameInput.blur();
   ns.style.display='none';gu.style.display='block';
   initGame();gameLoop();
 }
@@ -361,13 +359,10 @@ function gameLoop(){
   animId=requestAnimationFrame(gameLoop);
 }
 
+// Keyboard controls
 document.addEventListener('keydown',e=>{
   if(onTitleScreen){
-    if(e.key==='Enter'){startGame();return;}
-    if(e.key==='Backspace'){e.preventDefault();typedName=typedName.slice(0,-1);typedEl.textContent=typedName;return;}
-    if(e.key.length===1&&/^[a-zA-Z0-9 _-]$/.test(e.key)&&typedName.length<10){
-      typedName+=e.key.toUpperCase();typedEl.textContent=typedName;
-    }
+    if(e.key==='Enter')startGame();
     return;
   }
   if(e.code==='Space'){e.preventDefault();spaceHeld=true;}
@@ -376,15 +371,15 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('keyup',e=>{
   if(!onTitleScreen&&e.code==='Space'){spaceHeld=false;if(gameRunning)tryBonk();}
 });
-canvas.addEventListener('touchstart',e=>{e.preventDefault();touchHeld=true;},{passive:false});
-canvas.addEventListener('touchend',e=>{e.preventDefault();touchHeld=false;if(gameRunning)tryBonk();});
+
+// Mouse controls (game canvas)
 canvas.addEventListener('mousedown',()=>touchHeld=true);
 canvas.addEventListener('mouseup',()=>{touchHeld=false;if(gameRunning)tryBonk();});
 
-// Mobile: treat any screen touch as space hold/release
+// Touch controls - whole document for mobile
 document.addEventListener('touchstart',e=>{
-  if(onTitleScreen){startGame();return;}
-  if(!gameRunning){rb.click();return;}
+  if(onTitleScreen)return; // let title screen inputs work normally
+  if(!gameRunning){rb.click();e.preventDefault();return;}
   e.preventDefault();touchHeld=true;
 },{passive:false});
 document.addEventListener('touchend',e=>{
