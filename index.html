@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Hit Him With A Stick</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; touch-action: manipulation; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   body { background: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: monospace; }
   #gw { width: 700px; max-width: 100%; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.12); }
   #ns { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; gap: 1.2rem; min-height: 500px; background: #fff; }
@@ -380,6 +380,17 @@ canvas.addEventListener('touchstart',e=>{e.preventDefault();touchHeld=true;},{pa
 canvas.addEventListener('touchend',e=>{e.preventDefault();touchHeld=false;if(gameRunning)tryBonk();});
 canvas.addEventListener('mousedown',()=>touchHeld=true);
 canvas.addEventListener('mouseup',()=>{touchHeld=false;if(gameRunning)tryBonk();});
+
+// Mobile: treat any screen touch as space hold/release
+document.addEventListener('touchstart',e=>{
+  if(onTitleScreen){startGame();return;}
+  if(!gameRunning){rb.click();return;}
+  e.preventDefault();touchHeld=true;
+},{passive:false});
+document.addEventListener('touchend',e=>{
+  if(onTitleScreen)return;
+  e.preventDefault();touchHeld=false;if(gameRunning)tryBonk();
+},{passive:false});
 sb.addEventListener('click',startGame);
 rb.addEventListener('click',()=>{gameRunning=false;initGame();gameLoop();});
 
