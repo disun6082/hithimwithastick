@@ -76,12 +76,16 @@ const nameInput=document.getElementById('name-input');
 const sv=document.getElementById('sv'),cd=document.getElementById('cd'),cv=document.getElementById('cv'),bv=document.getElementById('bv');
 const os=document.getElementById('os'),fsEl=document.getElementById('fs'),om=document.getElementById('om'),rb=document.getElementById('rb');
 
-const W=1200,H=340,GROUND=H-60,CX=130,HIT_ZONE=90;
+const W=1200,H=340,GROUND=H-60,SCREEN_CX=150,HIT_ZONE=90;
 let animId,pName='VICTIM',best=0;
-let score,combo,bgX,spd,shakeT,bonkTexts,particles,floaties;
+let score,combo,shakeT,bonkTexts,particles,floaties;
 let runFrame,runTimer,hitReact,hitT,hitAnim;
 let chaserSwing,chaserSwingT,gameRunning;
 let titleFrame=0,titleTimer=0,onTitleScreen=true;
+
+// World positions - both characters move right in world space
+let cartmanX,runnerWorldX,cameraX;
+let cartmanSpeed,runnerSpeed;
 
 // Jump
 let isJumping=false,jumpVY=0,jumpY=0;
@@ -90,13 +94,12 @@ const JUMP_POWER=-13,GRAVITY=0.65;
 // Sprint (long press)
 let sprintHeld=false;
 
-// Gap & runner
-let gap,runnerX;
+// Runner AI
 let runnerState,runnerStateTimer,runnerSpeedMult;
 let runnerTaunting,runnerTauntMsg,runnerStumble;
 let stumbleTimer;
 
-// Obstacles (boxes thrown by runner)
+// Obstacles (boxes thrown by runner) - world X positions
 let boxes,boxTimer,boxInterval;
 
 const FUNNY=[
@@ -265,12 +268,14 @@ function startGame(){
 }
 
 function initGame(){
-  score=0;combo=0;bgX=0;spd=3;shakeT=0;
+  score=0;combo=0;shakeT=0;
   bonkTexts=[];particles=[];floaties=[];
   runFrame=0;runTimer=0;hitReact=false;hitT=0;hitAnim=0;
   chaserSwing=false;chaserSwingT=0;gameRunning=true;
   isJumping=false;jumpVY=0;jumpY=0;sprintHeld=false;
-  gap=700;runnerX=CX+gap;
+  // World positions
+  cartmanX=0;runnerWorldX=700;cameraX=0;
+  cartmanSpeed=4;runnerSpeed=4;
   runnerState='normal';runnerStateTimer=60;runnerSpeedMult=1;
   runnerTaunting=false;runnerTauntMsg='';runnerStumble=false;stumbleTimer=0;
   boxes=[];boxTimer=0;boxInterval=90;
@@ -289,42 +294,36 @@ function spawnBox(){
   const difficulty=Math.min(score*0.03,1);
   const r=Math.random();
   let bw,bh;
-  if(r<0.5){bw=30;bh=30;} // small
-  else if(r<0.8){bw=30;bh=50;} // tall
-  else {bw=50;bh=30;} // wide
+  if(r<0.5){bw=30;bh=30;}
+  else if(r<0.8){bw=30;bh=50;}
+  else {bw=50;bh=30;}
 
-  // Thrown from runner position
-  const throwLine=THROW_LINES[Math.floor(Math.random()*THROW_LINES.length)];
-  bonkTexts.push({text:throwLine,x:runnerX,y:GROUND-100,life:0.5,size:14,color:'#e67e22',wobble:false});
+  const rsx=runnerWorldX-cameraX; // runner screen X for text
+  bonkTexts.push({text:THROW_LINES[Math.floor(Math.random()*THROW_LINES.length)],x:rsx,y:GROUND-100,life:0.5,size:14,color:'#e67e22',wobble:false});
 
   boxes.push({
-    x:runnerX-20,
+    wx:runnerWorldX-20, // world X
     y:GROUND-bh,
     w:bw,h:bh,
-    vx:-(4+spd+difficulty*3), // speed toward Cartman
+    vx:-(6+cartmanSpeed+difficulty*3), // travels left in world space
     active:true
   });
 }
 
-// ─── Collision ──────────────────────────────────────────────────────────────
 function checkBoxCollision(box){
   if(!box.active)return false;
-  // Cartman hitbox (rough): CX-18 to CX+18, chaserY-80 to chaserY
   const chaserY=GROUND+jumpY;
-  const cartLeft=CX-18,cartRight=CX+18;
-  const cartTop=chaserY-80,cartBot=chaserY;
-  const boxLeft=box.x,boxRight=box.x+box.w;
-  const boxTop=box.y,boxBot=box.y+box.h;
-  return cartRight>boxLeft&&cartLeft<boxRight&&cartBot>boxTop&&cartTop<boxBot;
+  const cartScreenX=cartmanX-cameraX;
+  const boxScreenX=box.wx-cameraX;
+  return (cartScreenX+18)>(boxScreenX)&&(cartScreenX-18)<(boxScreenX+box.w)&&chaserY>(box.y)&&(chaserY-80)<(box.y+box.h);
 }
 
 // ─── Bonk (auto when close enough) ─────────────────────────────────────────
 function doBoink(){
+  const gap=runnerWorldX-cartmanX;
   const closeness=Math.max(0,Math.min(1,1-(gap-50)/(HIT_ZONE-50)));
   let pts=Math.ceil(closeness*5)+1;
-  let bonkLabel='BONK!';
-  let bonkSize=28;
-  let bonkCol='#e24b4a';
+  let bonkLabel='BONK!',bonkSize=28,bonkCol='#e24b4a';
 
   if(closeness>0.9){bonkLabel='PERFECT!!';bonkSize=42;bonkCol='#f7c948';}
   else if(closeness>0.6){bonkLabel='GREAT!';bonkSize=36;bonkCol='#1D9E75';}
@@ -335,22 +334,24 @@ function doBoink(){
   const totalPts=pts*(combo>=2?comboMult:1);
   score+=totalPts;
 
-  bonkTexts.push({text:bonkLabel,x:runnerX,y:GROUND-110,life:1,size:bonkSize,color:bonkCol});
-  bonkTexts.push({text:'+'+totalPts,x:runnerX,y:GROUND-130,life:1,size:20,color:'#fff'});
-  if(combo>=2)bonkTexts.push({text:'x'+comboMult+' COMBO',x:runnerX-40,y:GROUND-90,life:0.7,size:14,color:'#1D9E75'});
+  const rsx=runnerWorldX-cameraX;
+  bonkTexts.push({text:bonkLabel,x:rsx,y:GROUND-110,life:1,size:bonkSize,color:bonkCol});
+  bonkTexts.push({text:'+'+totalPts,x:rsx,y:GROUND-130,life:1,size:20,color:'#fff'});
+  if(combo>=2)bonkTexts.push({text:'x'+comboMult+' COMBO',x:rsx-40,y:GROUND-90,life:0.7,size:14,color:'#1D9E75'});
   const cry=FUNNY[Math.floor(Math.random()*FUNNY.length)];
-  bonkTexts.push({text:cry,x:runnerX+20,y:GROUND-145,life:1,size:16,color:'#e24b4a',wobble:true});
+  bonkTexts.push({text:cry,x:rsx+20,y:GROUND-145,life:1,size:16,color:'#e24b4a',wobble:true});
 
-  spawnParticles(runnerX,GROUND-50);spawnFloaties(runnerX,GROUND-70);
+  spawnParticles(rsx,GROUND-50);spawnFloaties(rsx,GROUND-70);
   hitReact=true;hitT=38;hitAnim=(hitAnim+1)%4;
   chaserSwing=true;chaserSwingT=24;shakeT=closeness>0.8?18:12;
   sv.textContent=score;
   if(combo>=2){cd.style.display='block';cv.textContent='x'+comboMult;}
   if(score>best){best=score;bv.textContent=best;}
 
-  // After bonk: runner runs away, speed up
-  gap=600+Math.random()*150;
-  spd=Math.min(spd+0.15,8);
+  // After bonk: runner sprints away
+  runnerWorldX=cartmanX+600+Math.random()*150;
+  cartmanSpeed=Math.min(cartmanSpeed+0.15,8);
+  runnerSpeed=cartmanSpeed; // runner base matches Cartman
   boxInterval=Math.max(35,boxInterval-3);
   runnerState='normal';runnerStateTimer=40;
   runnerTaunting=false;runnerStumble=false;
@@ -358,12 +359,12 @@ function doBoink(){
 
 function onBoxHit(){
   combo=0;cd.style.display='none';
-  gap+=60+Math.random()*30;
-  shakeT=8;
-  bonkTexts.push({text:'OUCH!',x:CX,y:GROUND-100+jumpY,life:0.7,size:22,color:'#e24b4a'});
-  bonkTexts.push({text:'*stumbles*',x:CX+20,y:GROUND-75+jumpY,life:0.5,size:14,color:C.miss});
-  // Cartman stumble: brief slow
+  // Cartman slows down, runner pulls ahead
   stumbleTimer=30;
+  shakeT=8;
+  const csx=cartmanX-cameraX;
+  bonkTexts.push({text:'OUCH!',x:csx,y:GROUND-100+jumpY,life:0.7,size:22,color:'#e24b4a'});
+  bonkTexts.push({text:'*stumbles*',x:csx+20,y:GROUND-75+jumpY,life:0.5,size:14,color:C.miss});
 }
 
 // ─── Effects ────────────────────────────────────────────────────────────────
@@ -382,22 +383,23 @@ function spawnFloaties(x,y){
 function drawBg(){
   ctx.fillStyle=C.sky;ctx.fillRect(0,0,W,GROUND);
   ctx.fillStyle=C.cloud;
-  for(let i=0;i<5;i++){
-    const cx2=((i*210-bgX*0.25)%(W+160)+W+160)%(W+160)-80,cy=32+(i%2)*26;
+  for(let i=0;i<6;i++){
+    const cx2=((i*240-cameraX*0.15)%(W+200)+W+200)%(W+200)-100,cy=32+(i%2)*26;
     ctx.beginPath();ctx.ellipse(cx2,cy,38,16,0,0,Math.PI*2);ctx.fill();
     ctx.beginPath();ctx.ellipse(cx2-22,cy+6,26,13,0,0,Math.PI*2);ctx.fill();
     ctx.beginPath();ctx.ellipse(cx2+22,cy+6,26,13,0,0,Math.PI*2);ctx.fill();
   }
   ctx.fillStyle=C.ground;ctx.fillRect(0,GROUND,W,H-GROUND);
   ctx.strokeStyle=C.gl;ctx.lineWidth=1;
-  for(let i=0;i<28;i++){
-    const lx=((i*75-bgX*1.5)%W+W)%W;
+  for(let i=0;i<30;i++){
+    const lx=((i*75-cameraX*1.2)%W+W)%W;
     ctx.beginPath();ctx.moveTo(lx,GROUND);ctx.lineTo(lx-18,H);ctx.stroke();
   }
 }
 
 function drawGapBar(){
   const bW=200,bH=10,bx=W/2-100,by=14;
+  const gap=runnerWorldX-cartmanX;
   const maxGap=850,pct=Math.max(0,Math.min(1,1-gap/maxGap));
   ctx.fillStyle='rgba(0,0,0,0.12)';ctx.beginPath();ctx.roundRect(bx,by,bW,bH,5);ctx.fill();
   const inRange=gap<=HIT_ZONE;
@@ -443,31 +445,32 @@ function updateBonkTexts(){
 // ─── Runner AI ──────────────────────────────────────────────────────────────
 function updateRunnerAI(){
   const difficulty=Math.min(score*0.03,1);
+  const gap=runnerWorldX-cartmanX;
+  const rsx=runnerWorldX-cameraX;
   runnerStateTimer--;
   if(runnerStateTimer<=0){
     const r=Math.random();
     if(gap<200){
-      // Close: run faster
       runnerState='panic';runnerStateTimer=40+Math.floor(Math.random()*30);
-      runnerSpeedMult=1.5+difficulty;
-      bonkTexts.push({text:'?!',x:runnerX,y:GROUND-105,life:0.5,size:22,color:'#e24b4a'});
+      runnerSpeedMult=1.8+difficulty;
+      bonkTexts.push({text:'?!',x:rsx,y:GROUND-105,life:0.5,size:22,color:'#e24b4a'});
     } else if(gap>400){
       if(r<0.4){
         runnerState='taunt';runnerStateTimer=60+Math.floor(Math.random()*40);
-        runnerTaunting=true;runnerSpeedMult=0.1;
+        runnerTaunting=true;runnerSpeedMult=0.3;
         runnerTauntMsg=TAUNTS[Math.floor(Math.random()*TAUNTS.length)];
-        bonkTexts.push({text:runnerTauntMsg,x:runnerX,y:GROUND-105,life:0.8,size:16,color:'#3498db',wobble:true});
+        bonkTexts.push({text:runnerTauntMsg,x:rsx,y:GROUND-105,life:0.8,size:16,color:'#3498db',wobble:true});
       } else if(r<0.55){
         runnerState='stumble';runnerStateTimer=35+Math.floor(Math.random()*20);
         runnerStumble=true;runnerSpeedMult=0;
-        bonkTexts.push({text:'*trips*',x:runnerX,y:GROUND-90,life:0.6,size:16,color:'#e67e22'});
+        bonkTexts.push({text:'*trips*',x:rsx,y:GROUND-90,life:0.6,size:16,color:'#e67e22'});
       } else {
         runnerState='normal';runnerStateTimer=30+Math.floor(Math.random()*30);
-        runnerSpeedMult=0.5+Math.random()*0.5;
+        runnerSpeedMult=0.8+Math.random()*0.4;
       }
     } else {
       runnerState='normal';runnerStateTimer=25+Math.floor(Math.random()*30);
-      runnerSpeedMult=0.5+Math.random()*0.8;
+      runnerSpeedMult=0.7+Math.random()*0.6;
     }
   }
   if(runnerStateTimer<=3){runnerTaunting=false;runnerStumble=false;}
@@ -476,20 +479,21 @@ function updateRunnerAI(){
 // ─── Game loop ──────────────────────────────────────────────────────────────
 function gameLoop(){
   if(!gameRunning)return;
-  bgX+=spd;
 
-  // Cartman auto-closes gap (slower when stumbling, faster when sprinting)
-  let closeRate=stumbleTimer>0?0.3:1.5+spd*0.2;
-  if(sprintHeld&&stumbleTimer<=0)closeRate+=3+spd*0.3;
-  gap-=closeRate;
+  // Move both characters in world space
+  // Cartman: base speed + sprint bonus, slowed when stumbling
+  let cartVel=cartmanSpeed;
+  if(stumbleTimer>0)cartVel=cartmanSpeed*0.3;
+  else if(sprintHeld)cartVel=cartmanSpeed+3+cartmanSpeed*0.4;
+  cartmanX+=cartVel;
 
-  // Runner AI pulls away
+  // Runner AI
   updateRunnerAI();
-  const runnerPull=runnerSpeedMult*0.6;
-  gap+=runnerPull;
+  const runnerVel=runnerSpeed*runnerSpeedMult;
+  runnerWorldX+=runnerVel;
 
-  gap=Math.max(40,Math.min(900,gap));
-  runnerX=CX+gap;
+  // Camera follows Cartman (Cartman stays at SCREEN_CX)
+  cameraX=cartmanX-SCREEN_CX;
 
   // Stumble recovery
   if(stumbleTimer>0)stumbleTimer--;
@@ -507,17 +511,19 @@ function gameLoop(){
     spawnBox();
   }
 
-  // Update boxes
+  // Update boxes (move in world space)
   boxes.forEach(b=>{
-    b.x+=b.vx;
+    b.wx+=b.vx;
     if(b.active&&checkBoxCollision(b)){
       b.active=false;
       onBoxHit();
     }
   });
-  boxes=boxes.filter(b=>b.x+b.w>-50);
+  // Remove boxes far behind camera
+  boxes=boxes.filter(b=>(b.wx-cameraX)+b.w>-100);
 
   // Auto-bonk when in range
+  const gap=runnerWorldX-cartmanX;
   if(gap<=HIT_ZONE&&!hitReact){
     doBoink();
   }
@@ -538,74 +544,76 @@ function gameLoop(){
   drawGapBar();
   updateParticles();updateFloaties();
 
-  // Draw boxes
+  // Draw boxes (world to screen)
   boxes.forEach(b=>{
-    if(b.active)drawBox(b.x,b.y,b.w,b.h);
-    else {
-      // Broken box fragments
-      ctx.globalAlpha=0.4;
-      drawBox(b.x,b.y+5,b.w*0.6,b.h*0.6);
-      ctx.globalAlpha=1;
+    const bsx=b.wx-cameraX;
+    if(bsx>-60&&bsx<W+60){
+      if(b.active)drawBox(bsx,b.y,b.w,b.h);
+      else {
+        ctx.globalAlpha=0.4;
+        drawBox(bsx,b.y+5,b.w*0.6,b.h*0.6);
+        ctx.globalAlpha=1;
+      }
     }
   });
 
-  // Draw runner
+  // Draw runner (world to screen)
+  const rsx=runnerWorldX-cameraX;
   const ry=GROUND;
-  if(runnerX<W+50){
+  if(rsx>-50&&rsx<W+50){
     ctx.font='bold 13px monospace';ctx.textAlign='center';
     ctx.fillStyle=hitReact?C.bonk:(runnerTaunting?'#3498db':(runnerStumble?'#e67e22':C.txt));
-    ctx.fillText(pName.toUpperCase(),runnerX,ry-88);
+    ctx.fillText(pName.toUpperCase(),rsx,ry-88);
 
     if(runnerStumble){
       ctx.strokeStyle=C.rb;ctx.lineWidth=3;ctx.lineCap='round';
-      ctx.beginPath();ctx.moveTo(runnerX-5,ry);ctx.lineTo(runnerX+15,ry-25);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(runnerX+10,ry-18);ctx.lineTo(runnerX+25,ry-10);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(runnerX+10,ry-18);ctx.lineTo(runnerX-5,ry-25);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(runnerX-5,ry);ctx.lineTo(runnerX-12,ry+2);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(runnerX-5,ry);ctx.lineTo(runnerX+8,ry+2);ctx.stroke();
-      ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(runnerX+18,ry-32,9,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.moveTo(rsx-5,ry);ctx.lineTo(rsx+15,ry-25);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(rsx+10,ry-18);ctx.lineTo(rsx+25,ry-10);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(rsx+10,ry-18);ctx.lineTo(rsx-5,ry-25);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(rsx-5,ry);ctx.lineTo(rsx-12,ry+2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(rsx-5,ry);ctx.lineTo(rsx+8,ry+2);ctx.stroke();
+      ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(rsx+18,ry-32,9,0,Math.PI*2);ctx.fill();
       ctx.strokeStyle=C.rb;ctx.lineWidth=2;ctx.stroke();
     } else if(runnerTaunting){
-      drawRunnerBody(runnerX,ry,runFrame,0);
+      drawRunnerBody(rsx,ry,runFrame,0);
       ctx.fillStyle='#555';
-      ctx.fillRect(runnerX-7,ry-61,4,3);ctx.fillRect(runnerX-2,ry-61,4,3);
+      ctx.fillRect(rsx-7,ry-61,4,3);ctx.fillRect(rsx-2,ry-61,4,3);
     } else {
-      drawRunnerBody(runnerX,ry,runFrame,hitReact?hitAnim:0);
+      drawRunnerBody(rsx,ry,runFrame,hitReact?hitAnim:0);
     }
-  } else {
-    // Runner off-screen indicator
+  } else if(rsx>=W+50){
     ctx.font='bold 12px monospace';ctx.textAlign='right';
     ctx.fillStyle=C.bonk;
-    ctx.fillText(pName+' →',W-10,30);
+    ctx.fillText(pName+' \u2192',W-10,30);
   }
 
-  // Draw Cartman
+  // Draw Cartman at fixed screen position
+  const cartScreenX=cartmanX-cameraX; // should equal SCREEN_CX
   const chaserY=GROUND+jumpY;
-  drawCartmanOnCtx(ctx,CX,chaserY,1,chaserSwing,chaserSwing);
+  drawCartmanOnCtx(ctx,cartScreenX,chaserY,1,chaserSwing,chaserSwing);
 
   // Jump shadow
   if(isJumping){
     ctx.fillStyle='rgba(0,0,0,0.15)';
-    ctx.beginPath();ctx.ellipse(CX,GROUND+2,22,6,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(cartScreenX,GROUND+2,22,6,0,0,Math.PI*2);ctx.fill();
   }
 
   // Stumble indicator
   if(stumbleTimer>0){
     ctx.font='bold 12px monospace';ctx.textAlign='center';
     ctx.fillStyle='rgba(226,75,74,0.6)';
-    ctx.fillText('STUNNED',CX,GROUND+20);
+    ctx.fillText('STUNNED',cartScreenX,GROUND+20);
   }
 
   // Sprint indicator
   if(sprintHeld&&stumbleTimer<=0&&!isJumping){
     ctx.font='bold 11px monospace';ctx.textAlign='center';
     ctx.fillStyle='#534AB7';
-    ctx.fillText('SPRINT!',CX,GROUND+20);
-    // Speed lines behind Cartman
+    ctx.fillText('SPRINT!',cartScreenX,GROUND+20);
     ctx.strokeStyle='rgba(83,74,183,0.4)';ctx.lineWidth=2;
     for(let i=0;i<3;i++){
       const ly=GROUND-20-i*20+jumpY;
-      ctx.beginPath();ctx.moveTo(CX-30-i*8,ly);ctx.lineTo(CX-50-i*8,ly);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cartScreenX-30-i*8,ly);ctx.lineTo(cartScreenX-50-i*8,ly);ctx.stroke();
     }
   }
 
