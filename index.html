@@ -49,7 +49,7 @@
     <canvas id="tc" width="340" height="155" style="width:340px;max-width:100%;image-rendering:pixelated;border-radius:8px;overflow:hidden;"></canvas>
     <input id="name-input" type="text" maxlength="10" placeholder="ENTER NAME" autocomplete="off" autocapitalize="characters" spellcheck="false">
     <button id="sb">START</button>
-    <p style="font-size:11px;color:#aaa;margin-top:4px;">TAP / SPACE → jump over boxes · get close → auto BONK!</p>
+    <p style="font-size:11px;color:#aaa;margin-top:4px;">TAP → jump · HOLD → sprint · dodge boxes · get close → BONK!</p>
   </div>
   <div id="gu">
     <div id="hud">
@@ -58,7 +58,7 @@
       <div>BEST: <span id="bv">0</span></div>
     </div>
     <canvas id="c" width="900" height="340"></canvas>
-    <div id="hint">TAP / SPACE → jump over boxes · dodge to get close · BONK!</div>
+    <div id="hint">TAP → jump · HOLD → sprint · dodge boxes to get close · BONK!</div>
     <div id="os">
       <h2>RESPAWNING...</h2>
       <p id="om"></p>
@@ -86,6 +86,9 @@ let titleFrame=0,titleTimer=0,onTitleScreen=true;
 // Jump
 let isJumping=false,jumpVY=0,jumpY=0;
 const JUMP_POWER=-13,GRAVITY=0.65;
+
+// Sprint (long press)
+let sprintHeld=false;
 
 // Gap & runner
 let gap,runnerX;
@@ -266,7 +269,7 @@ function initGame(){
   bonkTexts=[];particles=[];floaties=[];
   runFrame=0;runTimer=0;hitReact=false;hitT=0;hitAnim=0;
   chaserSwing=false;chaserSwingT=0;gameRunning=true;
-  isJumping=false;jumpVY=0;jumpY=0;
+  isJumping=false;jumpVY=0;jumpY=0;sprintHeld=false;
   gap=500;runnerX=CX+gap;
   runnerState='normal';runnerStateTimer=60;runnerSpeedMult=1;
   runnerTaunting=false;runnerTauntMsg='';runnerStumble=false;stumbleTimer=0;
@@ -402,7 +405,7 @@ function drawGapBar(){
   ctx.beginPath();ctx.roundRect(bx,by,bW*pct,bH,5);ctx.fill();
   ctx.font='9px monospace';ctx.textAlign='center';
   ctx.fillStyle=inRange?C.bonk:C.muted;
-  const label=inRange?'BONK RANGE!':'CLOSING IN...';
+  const label=inRange?'BONK RANGE!':(sprintHeld?'SPRINTING!':'CLOSING IN...');
   ctx.fillText(label,W/2,by+bH+13);
 }
 
@@ -475,8 +478,9 @@ function gameLoop(){
   if(!gameRunning)return;
   bgX+=spd;
 
-  // Cartman auto-closes gap (slower when stumbling)
-  const closeRate=stumbleTimer>0?0.3:1.5+spd*0.2;
+  // Cartman auto-closes gap (slower when stumbling, faster when sprinting)
+  let closeRate=stumbleTimer>0?0.3:1.5+spd*0.2;
+  if(sprintHeld&&stumbleTimer<=0)closeRate+=3+spd*0.3;
   gap-=closeRate;
 
   // Runner AI pulls away
@@ -592,11 +596,25 @@ function gameLoop(){
     ctx.fillText('STUNNED',CX,GROUND+20);
   }
 
+  // Sprint indicator
+  if(sprintHeld&&stumbleTimer<=0&&!isJumping){
+    ctx.font='bold 11px monospace';ctx.textAlign='center';
+    ctx.fillStyle='#534AB7';
+    ctx.fillText('SPRINT!',CX,GROUND+20);
+    // Speed lines behind Cartman
+    ctx.strokeStyle='rgba(83,74,183,0.4)';ctx.lineWidth=2;
+    for(let i=0;i<3;i++){
+      const ly=GROUND-20-i*20+jumpY;
+      ctx.beginPath();ctx.moveTo(CX-30-i*8,ly);ctx.lineTo(CX-50-i*8,ly);ctx.stroke();
+    }
+  }
+
   updateBonkTexts();ctx.restore();
   animId=requestAnimationFrame(gameLoop);
 }
 
 // ─── Controls ───────────────────────────────────────────────────────────────
+// Short press = jump, long hold = sprint
 document.addEventListener('keydown',e=>{
   if(onTitleScreen){
     if(e.key==='Enter')startGame();
@@ -604,17 +622,25 @@ document.addEventListener('keydown',e=>{
   }
   if(e.code==='Space'){
     e.preventDefault();
-    triggerJump();
+    if(!sprintHeld){triggerJump();sprintHeld=true;}
   }
   if(e.code==='Enter'&&!gameRunning)rb.click();
 });
+document.addEventListener('keyup',e=>{
+  if(e.code==='Space')sprintHeld=false;
+});
 
-canvas.addEventListener('mousedown',()=>{if(!onTitleScreen)triggerJump();});
+canvas.addEventListener('mousedown',()=>{if(!onTitleScreen){triggerJump();sprintHeld=true;}});
+canvas.addEventListener('mouseup',()=>{sprintHeld=false;});
 
 document.addEventListener('touchstart',e=>{
   if(onTitleScreen)return;
   if(!gameRunning){rb.click();e.preventDefault();return;}
-  e.preventDefault();triggerJump();
+  e.preventDefault();triggerJump();sprintHeld=true;
+},{passive:false});
+document.addEventListener('touchend',e=>{
+  if(onTitleScreen)return;
+  e.preventDefault();sprintHeld=false;
 },{passive:false});
 
 sb.addEventListener('click',startGame);
