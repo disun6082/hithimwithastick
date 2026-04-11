@@ -49,7 +49,7 @@
     <canvas id="tc" width="340" height="155" style="width:340px;max-width:100%;image-rendering:pixelated;border-radius:8px;overflow:hidden;"></canvas>
     <input id="name-input" type="text" maxlength="10" placeholder="ENTER NAME" autocomplete="off" autocapitalize="characters" spellcheck="false">
     <button id="sb">START</button>
-    <p style="font-size:11px;color:#aaa;margin-top:4px;">HOLD to sprint close · RELEASE to BONK</p>
+    <p style="font-size:11px;color:#aaa;margin-top:4px;">HOLD → sprint · RELEASE → BONK · DOUBLE-TAP → JUMP BONK!</p>
   </div>
   <div id="gu">
     <div id="hud">
@@ -58,7 +58,7 @@
       <div>BEST: <span id="bv">0</span></div>
     </div>
     <canvas id="c" width="700" height="310"></canvas>
-    <div id="hint">HOLD SPACE / HOLD SCREEN → sprint · RELEASE → BONK</div>
+    <div id="hint">HOLD → sprint · RELEASE → BONK · DOUBLE-TAP → JUMP BONK!</div>
     <div id="os">
       <h2>RESPAWNING...</h2>
       <p id="om"></p>
@@ -76,13 +76,22 @@ const nameInput=document.getElementById('name-input');
 const sv=document.getElementById('sv'),cd=document.getElementById('cd'),cv=document.getElementById('cv'),bv=document.getElementById('bv');
 const os=document.getElementById('os'),fs=document.getElementById('fs'),om=document.getElementById('om'),rb=document.getElementById('rb');
 
-const W=700,H=310,GROUND=H-60,RX=510,MIN_GAP=42,HIT_ZONE=68;
+const W=700,H=310,GROUND=H-60,RX=510,MIN_GAP=42,HIT_ZONE=85;
 let animId,pName='VICTIM',best=0;
 let score,combo,bgX,spd,shakeT,bonkTexts,particles,floaties;
 let runFrame,runTimer,hitReact,hitT,hitAnim;
 let chaserSwing,chaserSwingT,gameRunning,gap,chaserX;
 let spaceHeld=false,touchHeld=false;
 let titleFrame=0,titleTimer=0,onTitleScreen=true;
+
+// Jump state
+let isJumping=false,jumpVY=0,jumpY=0;
+const JUMP_POWER=-12,GRAVITY=0.7;
+let lastTapTime=0;
+const DOUBLE_TAP_MS=300;
+
+// Runner (target) movement
+let runnerBaseX=RX,runnerDodgeX=0,runnerDodgeTarget=0,runnerDodgeTimer=0;
 
 const FUNNY=[
   'OW!!','MY SPINE!','NOT THE FACE!','HELP!!!','MOM!!!',
@@ -199,28 +208,60 @@ function initGame(){
   runFrame=0;runTimer=0;hitReact=false;hitT=0;hitAnim=0;
   chaserSwing=false;chaserSwingT=0;gameRunning=true;
   spaceHeld=false;touchHeld=false;gap=170;chaserX=RX-gap;
+  isJumping=false;jumpVY=0;jumpY=0;lastTapTime=0;
+  runnerBaseX=RX;runnerDodgeX=0;runnerDodgeTarget=0;runnerDodgeTimer=0;
   sv.textContent='0';cd.style.display='none';os.style.display='none';
 }
 
 function isHolding(){return spaceHeld||touchHeld;}
-function tryBonk(){if(!gameRunning)return;if(gap<=HIT_ZONE){doBoink();}else{doMiss();}}
 
-function doBoink(){
-  score++;combo++;
-  const labels=['BONK!','DOUBLE BONK!','RAGE BONK!!','ULTRA BONK!!!','OMEGA BONK!!!'];
-  const sizes=[26,30,34,40,40];
-  const cols=['#e24b4a','#1D9E75','#BA7517','#534AB7','#e24b4a'];
-  const ci=Math.min(combo-1,4);
-  bonkTexts.push({text:labels[ci],x:RX,y:GROUND-100,life:1,size:sizes[ci],color:cols[ci]});
+function triggerJump(){
+  if(!isJumping&&gameRunning){
+    isJumping=true;jumpVY=JUMP_POWER;
+  }
+}
+
+function tryBonk(){
+  if(!gameRunning)return;
+  const actualRX=runnerBaseX+runnerDodgeX;
+  const actualGap=actualRX-chaserX;
+  if(actualGap<=HIT_ZONE){doBoink(actualGap,actualRX);}else{doMiss();}
+}
+
+function doBoink(actualGap,actualRX){
+  // Distance scoring: closer = more points (1-5 base)
+  const closeness=1-Math.max(0,Math.min(1,(actualGap-MIN_GAP)/(HIT_ZONE-MIN_GAP)));
+  let pts=Math.ceil(closeness*5);
+  let bonkLabel='BONK!';
+  let bonkSize=26;
+  let bonkCol='#e24b4a';
+
+  // Jump bonus: 2x multiplier
+  const jumpBonus=isJumping;
+  if(jumpBonus)pts*=2;
+
+  if(closeness>0.9){bonkLabel=jumpBonus?'AIR PERFECT!!!':'PERFECT!!';bonkSize=42;bonkCol='#f7c948';}
+  else if(closeness>0.7){bonkLabel=jumpBonus?'AIR SMASH!!':'GREAT!';bonkSize=36;bonkCol='#1D9E75';}
+  else if(closeness>0.4){bonkLabel=jumpBonus?'JUMP BONK!':'BONK!';bonkSize=30;bonkCol='#BA7517';}
+  else {bonkLabel=jumpBonus?'AIR TAP':'bonk';bonkSize=24;bonkCol='#e24b4a';}
+
+  score+=pts;combo++;
+  const comboMult=Math.min(combo,5);
+  if(combo>=2)pts*=comboMult;
+  if(combo>=2)score+=(pts-Math.ceil(closeness*5*(jumpBonus?2:1)));
+
+  bonkTexts.push({text:bonkLabel,x:actualRX,y:GROUND-100+jumpY,life:1,size:bonkSize,color:bonkCol});
+  bonkTexts.push({text:'+'+pts+(combo>=2?' x'+comboMult:''),x:actualRX,y:GROUND-120+jumpY,life:1,size:20,color:'#fff'});
+  if(jumpBonus)bonkTexts.push({text:'AERIAL!',x:chaserX+20,y:GROUND-140+jumpY,life:0.8,size:18,color:'#9b59b6'});
   const cry=FUNNY[Math.floor(Math.random()*FUNNY.length)];
-  bonkTexts.push({text:cry,x:RX+20,y:GROUND-125,life:1,size:16,color:'#e24b4a',wobble:true});
-  spawnParticles(RX,GROUND-50);spawnFloaties(RX,GROUND-70);
+  bonkTexts.push({text:cry,x:actualRX+20,y:GROUND-135+jumpY,life:1,size:16,color:'#e24b4a',wobble:true});
+  spawnParticles(actualRX,GROUND-50+jumpY);spawnFloaties(actualRX,GROUND-70+jumpY);
   hitReact=true;hitT=38;hitAnim=(hitAnim+1)%4;
-  chaserSwing=true;chaserSwingT=24;shakeT=12;
+  chaserSwing=true;chaserSwingT=24;shakeT=closeness>0.8?18:12;
   sv.textContent=score;
-  if(combo>=2){cd.style.display='block';cv.textContent='x'+Math.min(combo,4);}
+  if(combo>=2){cd.style.display='block';cv.textContent='x'+comboMult;}
   if(score>best){best=score;bv.textContent=best;}
-  spd=Math.min(spd+0.09,6);gap=Math.min(gap+90,210);
+  spd=Math.min(spd+0.09,6);gap=Math.min(gap+100,220);
 }
 
 function doMiss(){
@@ -289,13 +330,17 @@ function drawRunnerBody(x,y,frame,hitAn){
 
 function drawProxBar(){
   const bW=180,bH=10,bx=W/2-90,by=14;
-  const pct=Math.max(0,Math.min(1,(200-gap)/(200-MIN_GAP)));
+  const actualRX=runnerBaseX+runnerDodgeX;
+  const actualGap=actualRX-chaserX;
+  const pct=Math.max(0,Math.min(1,(200-actualGap)/(200-MIN_GAP)));
   ctx.fillStyle='rgba(0,0,0,0.12)';ctx.beginPath();ctx.roundRect(bx,by,bW,bH,5);ctx.fill();
-  ctx.fillStyle=pct>0.78?C.bonk:C.spbar;
+  const inRange=actualGap<=HIT_ZONE;
+  ctx.fillStyle=inRange?C.bonk:C.spbar;
   ctx.beginPath();ctx.roundRect(bx,by,bW*pct,bH,5);ctx.fill();
   ctx.font='9px monospace';ctx.textAlign='center';
-  ctx.fillStyle=pct>0.78?C.bonk:C.muted;
-  ctx.fillText(pct>0.78?'RELEASE TO BONK!':'HOLD TO SPRINT',W/2,by+bH+13);
+  ctx.fillStyle=inRange?C.bonk:C.muted;
+  const label=inRange?(isJumping?'RELEASE FOR AIR BONK!':'RELEASE TO BONK!'):(isJumping?'JUMPING...':'HOLD TO SPRINT');
+  ctx.fillText(label,W/2,by+bH+13);
 }
 
 function updateParticles(){
@@ -332,31 +377,81 @@ function updateBonkTexts(){
 function gameLoop(){
   if(!gameRunning)return;
   bgX+=spd;
-  if(isHolding()){gap-=(3.6+spd*0.4);}else{gap+=0.5+spd*0.15;}
-  gap=Math.max(MIN_GAP,Math.min(225,gap));chaserX=RX-gap;
+
+  // Sprint: increased closing speed
+  if(isHolding()){gap-=(5.5+spd*0.5);}else{gap+=0.5+spd*0.15;}
+  gap=Math.max(MIN_GAP,Math.min(225,gap));chaserX=runnerBaseX-gap+runnerDodgeX;
+
+  // Jump physics
+  if(isJumping){
+    jumpY+=jumpVY;jumpVY+=GRAVITY;
+    if(jumpY>=0){jumpY=0;jumpVY=0;isJumping=false;}
+  }
+
+  // Runner dodging - gets more aggressive with score
+  runnerDodgeTimer--;
+  if(runnerDodgeTimer<=0){
+    const dodgeChance=Math.min(0.04+score*0.003,0.15);
+    if(Math.random()<dodgeChance){
+      runnerDodgeTarget=(Math.random()-0.3)*60; // bias forward (away)
+      runnerDodgeTarget=Math.max(-20,Math.min(50,runnerDodgeTarget));
+    }
+    runnerDodgeTimer=8+Math.floor(Math.random()*12);
+  }
+  runnerDodgeX+=(runnerDodgeTarget-runnerDodgeX)*0.08;
+
   runTimer++;if(runTimer>(isHolding()?7:13)){runFrame=1-runFrame;runTimer=0;}
-  if(hitT>0)hitT--;if(hitT===0)hitReact=false;
+  if(hitT>0)hitT--;if(hitT===0){hitReact=false;}
   if(chaserSwingT>0)chaserSwingT--;if(chaserSwingT===0)chaserSwing=false;
   if(shakeT>0)shakeT--;
+
+  // When hit, runner flinches back
+  if(hitReact&&hitT===37)runnerDodgeTarget=15;
+
   ctx.save();
   if(shakeT>0)ctx.translate((Math.random()-0.5)*8,(Math.random()-0.5)*5);
   ctx.clearRect(0,0,W,H);
   drawBg();drawProxBar();
   updateParticles();updateFloaties();
-  const rx=RX+(hitReact?14:0);
+
+  const rx=runnerBaseX+runnerDodgeX+(hitReact?14:0);
+  const ry=GROUND+jumpY; // runner Y doesn't change, only Cartman jumps
+
   ctx.font='bold 13px monospace';ctx.textAlign='center';
   ctx.fillStyle=hitReact?C.bonk:C.txt;
-  ctx.fillText(pName.toUpperCase(),rx,GROUND-88);
-  drawRunnerBody(rx,GROUND,runFrame,hitReact?hitAnim:0);
-  drawCartmanOnCtx(ctx,chaserX,GROUND,1,chaserSwing,chaserSwing);
-  if(gap<=HIT_ZONE+12){
-    const a=Math.max(0,1-(gap-MIN_GAP)/(HIT_ZONE-MIN_GAP+12));
+  ctx.fillText(pName.toUpperCase(),rx,ry-88);
+  drawRunnerBody(rx,ry,runFrame,hitReact?hitAnim:0);
+
+  // Draw Cartman (chaser) with jump offset
+  const chaserY=GROUND+jumpY;
+  drawCartmanOnCtx(ctx,chaserX,chaserY,1,chaserSwing,chaserSwing);
+
+  // Jump shadow when airborne
+  if(isJumping){
+    ctx.fillStyle='rgba(0,0,0,0.15)';
+    ctx.beginPath();ctx.ellipse(chaserX,GROUND+2,22,6,0,0,Math.PI*2);ctx.fill();
+  }
+
+  const actualGap=rx-chaserX;
+  if(actualGap<=HIT_ZONE+12&&actualGap>0){
+    const a=Math.max(0,1-(actualGap-MIN_GAP)/(HIT_ZONE-MIN_GAP+12));
     ctx.strokeStyle=`rgba(226,75,74,${a*0.45})`;ctx.lineWidth=1;ctx.setLineDash([4,4]);
-    ctx.beginPath();ctx.moveTo(chaserX+22,GROUND-55);ctx.lineTo(rx-16,GROUND-55);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(chaserX+22,chaserY-55);ctx.lineTo(rx-16,ry-55);ctx.stroke();
     ctx.setLineDash([]);
   }
   updateBonkTexts();ctx.restore();
   animId=requestAnimationFrame(gameLoop);
+}
+
+// Double-tap detection helper
+function handlePress(){
+  const now=Date.now();
+  if(now-lastTapTime<DOUBLE_TAP_MS){
+    triggerJump();
+    lastTapTime=0; // reset so triple tap doesn't re-trigger
+  } else {
+    lastTapTime=now;
+  }
 }
 
 // Keyboard controls
@@ -365,7 +460,11 @@ document.addEventListener('keydown',e=>{
     if(e.key==='Enter')startGame();
     return;
   }
-  if(e.code==='Space'){e.preventDefault();spaceHeld=true;}
+  if(e.code==='Space'){
+    e.preventDefault();
+    if(!spaceHeld)handlePress(); // detect double-tap on press
+    spaceHeld=true;
+  }
   if(e.code==='Enter'&&!gameRunning)rb.click();
 });
 document.addEventListener('keyup',e=>{
@@ -373,14 +472,14 @@ document.addEventListener('keyup',e=>{
 });
 
 // Mouse controls (game canvas)
-canvas.addEventListener('mousedown',()=>touchHeld=true);
+canvas.addEventListener('mousedown',()=>{handlePress();touchHeld=true;});
 canvas.addEventListener('mouseup',()=>{touchHeld=false;if(gameRunning)tryBonk();});
 
 // Touch controls - whole document for mobile
 document.addEventListener('touchstart',e=>{
-  if(onTitleScreen)return; // let title screen inputs work normally
+  if(onTitleScreen)return;
   if(!gameRunning){rb.click();e.preventDefault();return;}
-  e.preventDefault();touchHeld=true;
+  e.preventDefault();handlePress();touchHeld=true;
 },{passive:false});
 document.addEventListener('touchend',e=>{
   if(onTitleScreen)return;
