@@ -90,8 +90,14 @@ const JUMP_POWER=-12,GRAVITY=0.7;
 let lastTapTime=0;
 const DOUBLE_TAP_MS=300;
 
-// Runner (target) movement
-let runnerBaseX=RX,runnerDodgeX=0,runnerDodgeTarget=0,runnerDodgeTimer=0;
+// Runner (target) AI state
+let runnerBaseX=RX;
+let runnerState='normal'; // 'normal','panic','taunt','duck','stumble'
+let runnerStateTimer=0;
+let runnerSpeedMult=1; // speed multiplier for variable speed
+let runnerDucking=false,runnerDuckTimer=0;
+let runnerTaunting=false,runnerTauntMsg='';
+let runnerStumble=false;
 
 const FUNNY=[
   'OW!!','MY SPINE!','NOT THE FACE!','HELP!!!','MOM!!!',
@@ -209,7 +215,9 @@ function initGame(){
   chaserSwing=false;chaserSwingT=0;gameRunning=true;
   spaceHeld=false;touchHeld=false;gap=170;chaserX=RX-gap;
   isJumping=false;jumpVY=0;jumpY=0;lastTapTime=0;
-  runnerBaseX=RX;runnerDodgeX=0;runnerDodgeTarget=0;runnerDodgeTimer=0;
+  runnerBaseX=RX;runnerState='normal';runnerStateTimer=60;
+  runnerSpeedMult=1;runnerDucking=false;runnerDuckTimer=0;
+  runnerTaunting=false;runnerTauntMsg='';runnerStumble=false;
   sv.textContent='0';cd.style.display='none';os.style.display='none';
 }
 
@@ -221,47 +229,63 @@ function triggerJump(){
   }
 }
 
+const TAUNTS=['CAN\'T CATCH ME!','TOO SLOW!','HAHA!','NOPE!','OVER HERE!','MISSED ME!','LOL','EZ'];
+
 function tryBonk(){
   if(!gameRunning)return;
-  const actualRX=runnerBaseX+runnerDodgeX;
-  const actualGap=actualRX-chaserX;
-  if(actualGap<=HIT_ZONE){doBoink(actualGap,actualRX);}else{doMiss();}
+  if(gap>HIT_ZONE){doMiss();return;}
+  // Jump bonk while runner is ducking = whiff!
+  if(isJumping&&runnerDucking){
+    bonkTexts.push({text:'DUCKED!',x:RX,y:GROUND-110,life:0.8,size:28,color:'#9b59b6'});
+    bonkTexts.push({text:'whiff...',x:chaserX+20,y:GROUND-80,life:0.6,size:16,color:C.miss});
+    combo=0;cd.style.display='none';
+    return;
+  }
+  doBoink();
 }
 
-function doBoink(actualGap,actualRX){
+function doBoink(){
   // Distance scoring: closer = more points (1-5 base)
-  const closeness=1-Math.max(0,Math.min(1,(actualGap-MIN_GAP)/(HIT_ZONE-MIN_GAP)));
+  const closeness=1-Math.max(0,Math.min(1,(gap-MIN_GAP)/(HIT_ZONE-MIN_GAP)));
   let pts=Math.ceil(closeness*5);
   let bonkLabel='BONK!';
   let bonkSize=26;
   let bonkCol='#e24b4a';
 
-  // Jump bonus: 2x multiplier
+  // Jump bonus: 2x multiplier (but risky - can whiff on duck)
   const jumpBonus=isJumping;
   if(jumpBonus)pts*=2;
+
+  // Bonus for hitting during stumble
+  const stumbleBonus=runnerStumble;
+  if(stumbleBonus)pts+=3;
 
   if(closeness>0.9){bonkLabel=jumpBonus?'AIR PERFECT!!!':'PERFECT!!';bonkSize=42;bonkCol='#f7c948';}
   else if(closeness>0.7){bonkLabel=jumpBonus?'AIR SMASH!!':'GREAT!';bonkSize=36;bonkCol='#1D9E75';}
   else if(closeness>0.4){bonkLabel=jumpBonus?'JUMP BONK!':'BONK!';bonkSize=30;bonkCol='#BA7517';}
   else {bonkLabel=jumpBonus?'AIR TAP':'bonk';bonkSize=24;bonkCol='#e24b4a';}
 
-  score+=pts;combo++;
+  combo++;
   const comboMult=Math.min(combo,5);
-  if(combo>=2)pts*=comboMult;
-  if(combo>=2)score+=(pts-Math.ceil(closeness*5*(jumpBonus?2:1)));
+  const totalPts=pts*(combo>=2?comboMult:1);
+  score+=totalPts;
 
-  bonkTexts.push({text:bonkLabel,x:actualRX,y:GROUND-100+jumpY,life:1,size:bonkSize,color:bonkCol});
-  bonkTexts.push({text:'+'+pts+(combo>=2?' x'+comboMult:''),x:actualRX,y:GROUND-120+jumpY,life:1,size:20,color:'#fff'});
+  bonkTexts.push({text:bonkLabel,x:RX,y:GROUND-100+jumpY,life:1,size:bonkSize,color:bonkCol});
+  bonkTexts.push({text:'+'+totalPts,x:RX,y:GROUND-120+jumpY,life:1,size:20,color:'#fff'});
   if(jumpBonus)bonkTexts.push({text:'AERIAL!',x:chaserX+20,y:GROUND-140+jumpY,life:0.8,size:18,color:'#9b59b6'});
+  if(stumbleBonus)bonkTexts.push({text:'WHILE DOWN!',x:RX+30,y:GROUND-145+jumpY,life:0.8,size:16,color:'#e67e22'});
+  if(combo>=2)bonkTexts.push({text:'x'+comboMult+' COMBO',x:RX-30,y:GROUND-80,life:0.7,size:14,color:'#1D9E75'});
   const cry=FUNNY[Math.floor(Math.random()*FUNNY.length)];
-  bonkTexts.push({text:cry,x:actualRX+20,y:GROUND-135+jumpY,life:1,size:16,color:'#e24b4a',wobble:true});
-  spawnParticles(actualRX,GROUND-50+jumpY);spawnFloaties(actualRX,GROUND-70+jumpY);
+  bonkTexts.push({text:cry,x:RX+20,y:GROUND-135+jumpY,life:1,size:16,color:'#e24b4a',wobble:true});
+  spawnParticles(RX,GROUND-50+jumpY);spawnFloaties(RX,GROUND-70+jumpY);
   hitReact=true;hitT=38;hitAnim=(hitAnim+1)%4;
   chaserSwing=true;chaserSwingT=24;shakeT=closeness>0.8?18:12;
   sv.textContent=score;
   if(combo>=2){cd.style.display='block';cv.textContent='x'+comboMult;}
   if(score>best){best=score;bv.textContent=best;}
   spd=Math.min(spd+0.09,6);gap=Math.min(gap+100,220);
+  // Interrupt runner states on hit
+  runnerState='normal';runnerStateTimer=30;runnerTaunting=false;runnerStumble=false;runnerDucking=false;
 }
 
 function doMiss(){
@@ -330,16 +354,19 @@ function drawRunnerBody(x,y,frame,hitAn){
 
 function drawProxBar(){
   const bW=180,bH=10,bx=W/2-90,by=14;
-  const actualRX=runnerBaseX+runnerDodgeX;
-  const actualGap=actualRX-chaserX;
-  const pct=Math.max(0,Math.min(1,(200-actualGap)/(200-MIN_GAP)));
+  const pct=Math.max(0,Math.min(1,(200-gap)/(200-MIN_GAP)));
   ctx.fillStyle='rgba(0,0,0,0.12)';ctx.beginPath();ctx.roundRect(bx,by,bW,bH,5);ctx.fill();
-  const inRange=actualGap<=HIT_ZONE;
+  const inRange=gap<=HIT_ZONE;
   ctx.fillStyle=inRange?C.bonk:C.spbar;
   ctx.beginPath();ctx.roundRect(bx,by,bW*pct,bH,5);ctx.fill();
   ctx.font='9px monospace';ctx.textAlign='center';
   ctx.fillStyle=inRange?C.bonk:C.muted;
-  const label=inRange?(isJumping?'RELEASE FOR AIR BONK!':'RELEASE TO BONK!'):(isJumping?'JUMPING...':'HOLD TO SPRINT');
+  let label='HOLD TO SPRINT';
+  if(isJumping&&inRange)label=runnerDucking?'THEY DUCKED! DON\'T JUMP!':'RELEASE FOR AIR BONK!';
+  else if(inRange)label='RELEASE TO BONK!';
+  else if(isJumping)label='JUMPING...';
+  else if(runnerTaunting)label='THEY\'RE TAUNTING! GO!';
+  else if(runnerStumble)label='THEY STUMBLED! NOW!';
   ctx.fillText(label,W/2,by+bH+13);
 }
 
@@ -374,13 +401,76 @@ function updateBonkTexts(){
   ctx.globalAlpha=1;
 }
 
+function updateRunnerAI(){
+  const difficulty=Math.min(score*0.02,1); // 0-1 scaling with score
+  runnerStateTimer--;
+
+  if(runnerStateTimer<=0){
+    // Pick new state based on gap
+    const r=Math.random();
+    if(gap<100){
+      // Close: panic sprint or duck
+      if(r<0.5+difficulty*0.2){
+        runnerState='panic';runnerStateTimer=30+Math.floor(Math.random()*30);
+        runnerSpeedMult=2+difficulty;
+        bonkTexts.push({text:'?!',x:RX,y:GROUND-105,life:0.5,size:22,color:'#e24b4a'});
+      } else if(r<0.7+difficulty*0.15){
+        runnerState='duck';runnerStateTimer=20+Math.floor(Math.random()*20);
+        runnerDucking=true;runnerSpeedMult=0.3;
+        bonkTexts.push({text:'*ducks*',x:RX,y:GROUND-90,life:0.5,size:14,color:'#9b59b6'});
+      } else {
+        runnerState='normal';runnerStateTimer=20+Math.floor(Math.random()*30);
+        runnerSpeedMult=1+Math.random()*0.5;
+      }
+    } else if(gap>160){
+      // Far: taunt or stumble
+      if(r<0.35){
+        runnerState='taunt';runnerStateTimer=50+Math.floor(Math.random()*40);
+        runnerTaunting=true;runnerSpeedMult=0.2;
+        runnerTauntMsg=TAUNTS[Math.floor(Math.random()*TAUNTS.length)];
+        bonkTexts.push({text:runnerTauntMsg,x:RX,y:GROUND-105,life:0.8,size:16,color:'#3498db',wobble:true});
+      } else if(r<0.5-difficulty*0.1){
+        runnerState='stumble';runnerStateTimer=25+Math.floor(Math.random()*15);
+        runnerStumble=true;runnerSpeedMult=0.05;
+        bonkTexts.push({text:'*stumbles*',x:RX,y:GROUND-90,life:0.6,size:16,color:'#e67e22'});
+      } else {
+        runnerState='normal';runnerStateTimer=30+Math.floor(Math.random()*40);
+        runnerSpeedMult=0.8+Math.random()*0.6;
+      }
+    } else {
+      // Mid range: variable speed
+      runnerState='normal';runnerStateTimer=20+Math.floor(Math.random()*30);
+      runnerSpeedMult=0.6+Math.random()*1.0;
+      // Occasional random speed burst
+      if(r<0.15+difficulty*0.1){
+        runnerSpeedMult=1.8+difficulty*0.5;
+        bonkTexts.push({text:'!',x:RX,y:GROUND-100,life:0.4,size:18,color:'#f7c948'});
+      }
+    }
+  }
+
+  // End duck/taunt/stumble when timer expires
+  if(runnerStateTimer<=3){
+    runnerDucking=false;runnerTaunting=false;runnerStumble=false;
+  }
+
+  // Runner speed affects gap: runner pulls away based on their speed multiplier
+  const runnerPull=runnerSpeedMult*0.4;
+  gap+=runnerPull;
+}
+
 function gameLoop(){
   if(!gameRunning)return;
   bgX+=spd;
 
-  // Sprint: increased closing speed
-  if(isHolding()){gap-=(5.5+spd*0.5);}else{gap+=0.5+spd*0.15;}
-  gap=Math.max(MIN_GAP,Math.min(225,gap));chaserX=runnerBaseX-gap+runnerDodgeX;
+  // Cartman sprint: hold to close gap
+  if(isHolding()){gap-=(5.5+spd*0.5);}else{gap+=0.3+spd*0.1;}
+
+  // Runner AI
+  updateRunnerAI();
+
+  gap=Math.max(MIN_GAP,Math.min(280,gap));
+  chaserX=RX-gap;
 
   // Jump physics
   if(isJumping){
@@ -388,32 +478,12 @@ function gameLoop(){
     if(jumpY>=0){jumpY=0;jumpVY=0;isJumping=false;}
   }
 
-  // Runner dodging - panic when Cartman is close
-  const actualGapNow=runnerBaseX+runnerDodgeX-chaserX;
-  const panicking=actualGapNow<100;
-  runnerDodgeTimer--;
-  if(runnerDodgeTimer<=0){
-    const dodgeChance=panicking?0.6:Math.min(0.08+score*0.005,0.3);
-    if(Math.random()<dodgeChance){
-      const range=panicking?90:70;
-      runnerDodgeTarget=(Math.random()-0.2)*range; // bias forward (away)
-      runnerDodgeTarget=Math.max(-30,Math.min(panicking?80:70,runnerDodgeTarget));
-      // Speed burst: runner pulls away when dodging
-      gap+=panicking?18:8;
-      // Visual "!" when dodging
-      bonkTexts.push({text:panicking?'?!':'!',x:runnerBaseX+runnerDodgeX,y:GROUND-100,life:0.5,size:panicking?22:16,color:panicking?'#e24b4a':'#f7c948'});
-    }
-    runnerDodgeTimer=panicking?3+Math.floor(Math.random()*5):6+Math.floor(Math.random()*10);
-  }
-  runnerDodgeX+=(runnerDodgeTarget-runnerDodgeX)*0.2;
-
-  runTimer++;if(runTimer>(isHolding()?7:13)){runFrame=1-runFrame;runTimer=0;}
+  runTimer++;
+  const animSpd=runnerStumble?30:(runnerTaunting?20:(isHolding()?7:13));
+  if(runTimer>animSpd){runFrame=1-runFrame;runTimer=0;}
   if(hitT>0)hitT--;if(hitT===0){hitReact=false;}
   if(chaserSwingT>0)chaserSwingT--;if(chaserSwingT===0)chaserSwing=false;
   if(shakeT>0)shakeT--;
-
-  // When hit, runner flinches back
-  if(hitReact&&hitT===37)runnerDodgeTarget=15;
 
   ctx.save();
   if(shakeT>0)ctx.translate((Math.random()-0.5)*8,(Math.random()-0.5)*5);
@@ -421,13 +491,44 @@ function gameLoop(){
   drawBg();drawProxBar();
   updateParticles();updateFloaties();
 
-  const rx=runnerBaseX+runnerDodgeX+(hitReact?14:0);
-  const ry=GROUND; // runner stays on ground, only Cartman jumps
+  // Draw runner
+  const rx=RX+(hitReact?14:0);
+  const ry=GROUND;
+  const duckOffset=runnerDucking?12:0;
 
   ctx.font='bold 13px monospace';ctx.textAlign='center';
-  ctx.fillStyle=hitReact?C.bonk:C.txt;
-  ctx.fillText(pName.toUpperCase(),rx,ry-88);
-  drawRunnerBody(rx,ry,runFrame,hitReact?hitAnim:0);
+  ctx.fillStyle=hitReact?C.bonk:(runnerTaunting?'#3498db':(runnerStumble?'#e67e22':C.txt));
+  ctx.fillText(pName.toUpperCase(),rx,ry-88+duckOffset);
+
+  if(runnerDucking){
+    // Draw ducking runner (crouched)
+    ctx.strokeStyle=C.rb;ctx.lineWidth=3;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(rx-10,ry);ctx.lineTo(rx+10,ry);ctx.stroke(); // legs spread
+    ctx.beginPath();ctx.moveTo(rx,ry);ctx.lineTo(rx,ry-20);ctx.stroke(); // short body
+    ctx.beginPath();ctx.moveTo(rx-10,ry-15);ctx.lineTo(rx+10,ry-15);ctx.stroke(); // arms out
+    ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(rx,ry-28,9,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=C.rb;ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#555';ctx.fillRect(rx-4,ry-31,3,2);ctx.fillRect(rx+1,ry-31,3,2);
+  } else if(runnerStumble){
+    // Draw stumbling runner (falling forward)
+    ctx.strokeStyle=C.rb;ctx.lineWidth=3;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(rx-5,ry);ctx.lineTo(rx+15,ry-25);ctx.stroke(); // leaning body
+    ctx.beginPath();ctx.moveTo(rx+10,ry-18);ctx.lineTo(rx+25,ry-10);ctx.stroke(); // arm out
+    ctx.beginPath();ctx.moveTo(rx+10,ry-18);ctx.lineTo(rx-5,ry-25);ctx.stroke(); // other arm
+    ctx.beginPath();ctx.moveTo(rx-5,ry);ctx.lineTo(rx-12,ry+2);ctx.stroke(); // back leg
+    ctx.beginPath();ctx.moveTo(rx-5,ry);ctx.lineTo(rx+8,ry+2);ctx.stroke(); // front leg
+    ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(rx+18,ry-32,9,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=C.rb;ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#555';ctx.fillRect(rx+15,ry-35,3,2);ctx.fillRect(rx+20,ry-35,3,2);
+  } else if(runnerTaunting){
+    // Draw taunting runner (looking back)
+    drawRunnerBody(rx,ry,runFrame,0);
+    // Draw look-back indicator
+    ctx.fillStyle='#555';
+    ctx.fillRect(rx-7,ry-61,4,3);ctx.fillRect(rx-2,ry-61,4,3); // eyes looking left (at Cartman)
+  } else {
+    drawRunnerBody(rx,ry,runFrame,hitReact?hitAnim:0);
+  }
 
   // Draw Cartman (chaser) with jump offset
   const chaserY=GROUND+jumpY;
@@ -439,13 +540,21 @@ function gameLoop(){
     ctx.beginPath();ctx.ellipse(chaserX,GROUND+2,22,6,0,0,Math.PI*2);ctx.fill();
   }
 
-  const actualGap=rx-chaserX;
-  if(actualGap<=HIT_ZONE+12&&actualGap>0){
-    const a=Math.max(0,1-(actualGap-MIN_GAP)/(HIT_ZONE-MIN_GAP+12));
+  // Range indicator line
+  if(gap<=HIT_ZONE+12&&gap>0){
+    const a=Math.max(0,1-(gap-MIN_GAP)/(HIT_ZONE-MIN_GAP+12));
     ctx.strokeStyle=`rgba(226,75,74,${a*0.45})`;ctx.lineWidth=1;ctx.setLineDash([4,4]);
-    ctx.beginPath();ctx.moveTo(chaserX+22,chaserY-55);ctx.lineTo(rx-16,ry-55);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(chaserX+22,chaserY-55);ctx.lineTo(rx-16,ry-55+duckOffset);ctx.stroke();
     ctx.setLineDash([]);
   }
+
+  // Duck warning icon when ducking and in range
+  if(runnerDucking&&gap<HIT_ZONE+30){
+    ctx.font='bold 14px monospace';ctx.textAlign='center';
+    ctx.fillStyle='#9b59b6';
+    ctx.fillText('DUCKING!',RX,GROUND-45);
+  }
+
   updateBonkTexts();ctx.restore();
   animId=requestAnimationFrame(gameLoop);
 }
