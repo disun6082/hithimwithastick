@@ -388,17 +388,24 @@ function gameLoop(){
     if(jumpY>=0){jumpY=0;jumpVY=0;isJumping=false;}
   }
 
-  // Runner dodging - gets more aggressive with score
+  // Runner dodging - panic when Cartman is close
+  const actualGapNow=runnerBaseX+runnerDodgeX-chaserX;
+  const panicking=actualGapNow<100;
   runnerDodgeTimer--;
   if(runnerDodgeTimer<=0){
-    const dodgeChance=Math.min(0.04+score*0.003,0.15);
+    const dodgeChance=panicking?0.6:Math.min(0.08+score*0.005,0.3);
     if(Math.random()<dodgeChance){
-      runnerDodgeTarget=(Math.random()-0.3)*60; // bias forward (away)
-      runnerDodgeTarget=Math.max(-20,Math.min(50,runnerDodgeTarget));
+      const range=panicking?90:70;
+      runnerDodgeTarget=(Math.random()-0.2)*range; // bias forward (away)
+      runnerDodgeTarget=Math.max(-30,Math.min(panicking?80:70,runnerDodgeTarget));
+      // Speed burst: runner pulls away when dodging
+      gap+=panicking?18:8;
+      // Visual "!" when dodging
+      bonkTexts.push({text:panicking?'?!':'!',x:runnerBaseX+runnerDodgeX,y:GROUND-100,life:0.5,size:panicking?22:16,color:panicking?'#e24b4a':'#f7c948'});
     }
-    runnerDodgeTimer=8+Math.floor(Math.random()*12);
+    runnerDodgeTimer=panicking?3+Math.floor(Math.random()*5):6+Math.floor(Math.random()*10);
   }
-  runnerDodgeX+=(runnerDodgeTarget-runnerDodgeX)*0.08;
+  runnerDodgeX+=(runnerDodgeTarget-runnerDodgeX)*0.2;
 
   runTimer++;if(runTimer>(isHolding()?7:13)){runFrame=1-runFrame;runTimer=0;}
   if(hitT>0)hitT--;if(hitT===0){hitReact=false;}
