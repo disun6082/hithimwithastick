@@ -7,7 +7,7 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; touch-action: manipulation; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   body { background: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: monospace; }
-  #gw { width: 900px; max-width: 100%; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.12); }
+  #gw { width: 1200px; max-width: 100%; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.12); }
   #ns { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; gap: 1.2rem; min-height: 420px; background: #fff; }
   #sb, #rb {
     font-size: 13px; padding: 10px 28px; cursor: pointer; letter-spacing: 2px;
@@ -57,7 +57,7 @@
       <div id="cd" style="display:none">COMBO: <span id="cv">x1</span></div>
       <div>BEST: <span id="bv">0</span></div>
     </div>
-    <canvas id="c" width="900" height="340"></canvas>
+    <canvas id="c" width="1200" height="340"></canvas>
     <div id="hint">TAP → jump · HOLD → sprint · dodge boxes to get close · BONK!</div>
     <div id="os">
       <h2>RESPAWNING...</h2>
@@ -76,7 +76,7 @@ const nameInput=document.getElementById('name-input');
 const sv=document.getElementById('sv'),cd=document.getElementById('cd'),cv=document.getElementById('cv'),bv=document.getElementById('bv');
 const os=document.getElementById('os'),fsEl=document.getElementById('fs'),om=document.getElementById('om'),rb=document.getElementById('rb');
 
-const W=900,H=340,GROUND=H-60,CX=130,HIT_ZONE=90;
+const W=1200,H=340,GROUND=H-60,CX=130,HIT_ZONE=90;
 let animId,pName='VICTIM',best=0;
 let score,combo,bgX,spd,shakeT,bonkTexts,particles,floaties;
 let runFrame,runTimer,hitReact,hitT,hitAnim;
@@ -270,7 +270,7 @@ function initGame(){
   runFrame=0;runTimer=0;hitReact=false;hitT=0;hitAnim=0;
   chaserSwing=false;chaserSwingT=0;gameRunning=true;
   isJumping=false;jumpVY=0;jumpY=0;sprintHeld=false;
-  gap=500;runnerX=CX+gap;
+  gap=700;runnerX=CX+gap;
   runnerState='normal';runnerStateTimer=60;runnerSpeedMult=1;
   runnerTaunting=false;runnerTauntMsg='';runnerStumble=false;stumbleTimer=0;
   boxes=[];boxTimer=0;boxInterval=90;
@@ -349,7 +349,7 @@ function doBoink(){
   if(score>best){best=score;bv.textContent=best;}
 
   // After bonk: runner runs away, speed up
-  gap=400+Math.random()*100;
+  gap=600+Math.random()*150;
   spd=Math.min(spd+0.15,8);
   boxInterval=Math.max(35,boxInterval-3);
   runnerState='normal';runnerStateTimer=40;
@@ -398,7 +398,7 @@ function drawBg(){
 
 function drawGapBar(){
   const bW=200,bH=10,bx=W/2-100,by=14;
-  const maxGap=550,pct=Math.max(0,Math.min(1,1-gap/maxGap));
+  const maxGap=850,pct=Math.max(0,Math.min(1,1-gap/maxGap));
   ctx.fillStyle='rgba(0,0,0,0.12)';ctx.beginPath();ctx.roundRect(bx,by,bW,bH,5);ctx.fill();
   const inRange=gap<=HIT_ZONE;
   ctx.fillStyle=inRange?C.bonk:C.spbar;
@@ -488,7 +488,7 @@ function gameLoop(){
   const runnerPull=runnerSpeedMult*0.6;
   gap+=runnerPull;
 
-  gap=Math.max(40,Math.min(600,gap));
+  gap=Math.max(40,Math.min(900,gap));
   runnerX=CX+gap;
 
   // Stumble recovery
