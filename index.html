@@ -415,7 +415,7 @@ function gameLoop(){
   updateParticles();updateFloaties();
 
   const rx=runnerBaseX+runnerDodgeX+(hitReact?14:0);
-  const ry=GROUND+jumpY; // runner Y doesn't change, only Cartman jumps
+  const ry=GROUND; // runner stays on ground, only Cartman jumps
 
   ctx.font='bold 13px monospace';ctx.textAlign='center';
   ctx.fillStyle=hitReact?C.bonk:C.txt;
