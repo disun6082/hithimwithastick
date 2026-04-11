@@ -275,7 +275,7 @@ function initGame(){
   isJumping=false;jumpVY=0;jumpY=0;sprintHeld=false;
   // World positions
   cartmanX=0;runnerWorldX=700;cameraX=0;
-  cartmanSpeed=4;runnerSpeed=4;
+  cartmanSpeed=4;runnerSpeed=3;
   runnerState='normal';runnerStateTimer=60;runnerSpeedMult=1;
   runnerTaunting=false;runnerTauntMsg='';runnerStumble=false;stumbleTimer=0;
   boxes=[];boxTimer=0;boxInterval=90;
@@ -351,7 +351,7 @@ function doBoink(){
   // After bonk: runner sprints away
   runnerWorldX=cartmanX+600+Math.random()*150;
   cartmanSpeed=Math.min(cartmanSpeed+0.15,8);
-  runnerSpeed=cartmanSpeed; // runner base matches Cartman
+  runnerSpeed=cartmanSpeed*0.75; // runner base always slower than Cartman
   boxInterval=Math.max(35,boxInterval-3);
   runnerState='normal';runnerStateTimer=40;
   runnerTaunting=false;runnerStumble=false;
@@ -452,7 +452,7 @@ function updateRunnerAI(){
     const r=Math.random();
     if(gap<200){
       runnerState='panic';runnerStateTimer=40+Math.floor(Math.random()*30);
-      runnerSpeedMult=1.8+difficulty;
+      runnerSpeedMult=1.4+difficulty*0.5;
       bonkTexts.push({text:'?!',x:rsx,y:GROUND-105,life:0.5,size:22,color:'#e24b4a'});
     } else if(gap>400){
       if(r<0.4){
@@ -466,11 +466,11 @@ function updateRunnerAI(){
         bonkTexts.push({text:'*trips*',x:rsx,y:GROUND-90,life:0.6,size:16,color:'#e67e22'});
       } else {
         runnerState='normal';runnerStateTimer=30+Math.floor(Math.random()*30);
-        runnerSpeedMult=0.8+Math.random()*0.4;
+        runnerSpeedMult=0.6+Math.random()*0.4;
       }
     } else {
       runnerState='normal';runnerStateTimer=25+Math.floor(Math.random()*30);
-      runnerSpeedMult=0.7+Math.random()*0.6;
+      runnerSpeedMult=0.6+Math.random()*0.5;
     }
   }
   if(runnerStateTimer<=3){runnerTaunting=false;runnerStumble=false;}
@@ -484,7 +484,7 @@ function gameLoop(){
   // Cartman: base speed + sprint bonus, slowed when stumbling
   let cartVel=cartmanSpeed;
   if(stumbleTimer>0)cartVel=cartmanSpeed*0.3;
-  else if(sprintHeld)cartVel=cartmanSpeed+3+cartmanSpeed*0.4;
+  else if(sprintHeld)cartVel=cartmanSpeed*2.5;
   cartmanX+=cartVel;
 
   // Runner AI
