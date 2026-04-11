@@ -7,8 +7,8 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; touch-action: manipulation; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   body { background: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: monospace; }
-  #gw { width: 700px; max-width: 100%; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.12); }
-  #ns { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; gap: 1.2rem; min-height: 500px; background: #fff; }
+  #gw { width: 900px; max-width: 100%; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.12); }
+  #ns { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; gap: 1.2rem; min-height: 420px; background: #fff; }
   #sb, #rb {
     font-size: 13px; padding: 10px 28px; cursor: pointer; letter-spacing: 2px;
     border-radius: 8px; border: 1px solid #ccc; background: #f5f5f5; color: #222;
@@ -49,7 +49,7 @@
     <canvas id="tc" width="340" height="155" style="width:340px;max-width:100%;image-rendering:pixelated;border-radius:8px;overflow:hidden;"></canvas>
     <input id="name-input" type="text" maxlength="10" placeholder="ENTER NAME" autocomplete="off" autocapitalize="characters" spellcheck="false">
     <button id="sb">START</button>
-    <p style="font-size:11px;color:#aaa;margin-top:4px;">HOLD → sprint · RELEASE → BONK · DOUBLE-TAP → JUMP BONK!</p>
+    <p style="font-size:11px;color:#aaa;margin-top:4px;">TAP / SPACE → jump over boxes · get close → auto BONK!</p>
   </div>
   <div id="gu">
     <div id="hud">
@@ -57,8 +57,8 @@
       <div id="cd" style="display:none">COMBO: <span id="cv">x1</span></div>
       <div>BEST: <span id="bv">0</span></div>
     </div>
-    <canvas id="c" width="700" height="310"></canvas>
-    <div id="hint">HOLD → sprint · RELEASE → BONK · DOUBLE-TAP → JUMP BONK!</div>
+    <canvas id="c" width="900" height="340"></canvas>
+    <div id="hint">TAP / SPACE → jump over boxes · dodge to get close · BONK!</div>
     <div id="os">
       <h2>RESPAWNING...</h2>
       <p id="om"></p>
@@ -74,36 +74,35 @@ const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 const tc=document.getElementById('tc'),tctx=tc.getContext('2d');
 const nameInput=document.getElementById('name-input');
 const sv=document.getElementById('sv'),cd=document.getElementById('cd'),cv=document.getElementById('cv'),bv=document.getElementById('bv');
-const os=document.getElementById('os'),fs=document.getElementById('fs'),om=document.getElementById('om'),rb=document.getElementById('rb');
+const os=document.getElementById('os'),fsEl=document.getElementById('fs'),om=document.getElementById('om'),rb=document.getElementById('rb');
 
-const W=700,H=310,GROUND=H-60,RX=510,MIN_GAP=42,HIT_ZONE=85;
+const W=900,H=340,GROUND=H-60,CX=130,HIT_ZONE=90;
 let animId,pName='VICTIM',best=0;
 let score,combo,bgX,spd,shakeT,bonkTexts,particles,floaties;
 let runFrame,runTimer,hitReact,hitT,hitAnim;
-let chaserSwing,chaserSwingT,gameRunning,gap,chaserX;
-let spaceHeld=false,touchHeld=false;
+let chaserSwing,chaserSwingT,gameRunning;
 let titleFrame=0,titleTimer=0,onTitleScreen=true;
 
-// Jump state
+// Jump
 let isJumping=false,jumpVY=0,jumpY=0;
-const JUMP_POWER=-12,GRAVITY=0.7;
-let lastTapTime=0;
-const DOUBLE_TAP_MS=300;
+const JUMP_POWER=-13,GRAVITY=0.65;
 
-// Runner (target) AI state
-let runnerBaseX=RX;
-let runnerState='normal'; // 'normal','panic','taunt','duck','stumble'
-let runnerStateTimer=0;
-let runnerSpeedMult=1; // speed multiplier for variable speed
-let runnerDucking=false,runnerDuckTimer=0;
-let runnerTaunting=false,runnerTauntMsg='';
-let runnerStumble=false;
+// Gap & runner
+let gap,runnerX;
+let runnerState,runnerStateTimer,runnerSpeedMult;
+let runnerTaunting,runnerTauntMsg,runnerStumble;
+let stumbleTimer;
+
+// Obstacles (boxes thrown by runner)
+let boxes,boxTimer,boxInterval;
 
 const FUNNY=[
   'OW!!','MY SPINE!','NOT THE FACE!','HELP!!!','MOM!!!',
   'WHY ME??','AAUGH!','OWWW!!','MY NECK!','STAAAHP!',
   'NO NO NO!','OH GOD','RESPECT MY AUTHORITAH!','SOMEBODY HELP!','NOT AGAIN!!'
 ];
+const TAUNTS=['CAN\'T CATCH ME!','TOO SLOW!','HAHA!','NOPE!','CATCH THIS!','TAKE THAT!','EAT BOX!','LOL'];
+const THROW_LINES=['TAKE THIS!','CATCH!','DODGE THIS!','INCOMING!','HAH!','EAT WOOD!'];
 
 const C = {
   sky:'#c8e8f8', ground:'#c4a97a', gl:'#9a7850',
@@ -112,7 +111,7 @@ const C = {
   skin:'#f5c5a3', stick:'#333333',
   cloud:'rgba(255,255,255,0.88)', spbar:'#534AB7',
   star:'#f7c948', tear:'#5bbde4',
-  star2:'rgba(0,0,0,0)'
+  box:'#b5651d', boxDark:'#8B4513', boxLight:'#d4915c'
 };
 
 // ─── Cartman ─────────────────────────────────────────────────────────────────
@@ -170,158 +169,7 @@ function drawCartmanOnCtx(c,x,y,scale,swing,angry){
   }
 }
 
-// ─── Title screen ────────────────────────────────────────────────────────────
-function drawTitleScreen(){
-  const tw=340,th=155;
-  tctx.clearRect(0,0,tw,th);
-  tctx.fillStyle=C.sky;tctx.fillRect(0,0,tw,th);
-  tctx.fillStyle=C.ground;tctx.fillRect(0,th-28,tw,28);
-  const runnerX=235,cx2=105;
-  const lo=titleFrame===0?7:-7,ao=titleFrame===0?5:-5;
-  tctx.strokeStyle=C.rb;tctx.lineWidth=2.5;tctx.lineCap='round';
-  tctx.beginPath();tctx.moveTo(runnerX,th-28);tctx.lineTo(runnerX+lo,th-28);tctx.stroke();
-  tctx.beginPath();tctx.moveTo(runnerX,th-28);tctx.lineTo(runnerX-lo,th-28);tctx.stroke();
-  tctx.beginPath();tctx.moveTo(runnerX,th-28);tctx.lineTo(runnerX,th-46);tctx.stroke();
-  tctx.beginPath();tctx.moveTo(runnerX-9,th-37+ao);tctx.lineTo(runnerX+9,th-37-ao);tctx.stroke();
-  tctx.fillStyle=C.skin;tctx.beginPath();tctx.arc(runnerX,th-54,9,0,Math.PI*2);tctx.fill();
-  tctx.strokeStyle=C.rb;tctx.lineWidth=2;tctx.stroke();
-  tctx.fillStyle='#555';tctx.fillRect(runnerX-4,th-57,3,2);tctx.fillRect(runnerX+1,th-57,3,2);
-  tctx.font='bold 10px monospace';tctx.textAlign='center';tctx.fillStyle=C.txt;
-  tctx.fillText('TYPE NAME',runnerX,th-67);
-  drawCartmanOnCtx(tctx,cx2,th-28,0.55,true,true);
-  tctx.font='bold 14px monospace';tctx.textAlign='center';tctx.fillStyle=C.bonk;
-  tctx.fillText('HIT HIM WITH A STICK',170,18);
-}
-
-function animateTitleScreen(){
-  titleTimer++;if(titleTimer>14){titleFrame=1-titleFrame;titleTimer=0;}
-  drawTitleScreen();
-  if(onTitleScreen)requestAnimationFrame(animateTitleScreen);
-}
-
-// ─── Game init ───────────────────────────────────────────────────────────────
-function startGame(){
-  onTitleScreen=false;
-  pName=(nameInput.value.trim()||'VICTIM').toUpperCase();
-  nameInput.blur();
-  ns.style.display='none';gu.style.display='block';
-  initGame();gameLoop();
-}
-
-function initGame(){
-  score=0;combo=0;bgX=0;spd=2.2;shakeT=0;
-  bonkTexts=[];particles=[];floaties=[];
-  runFrame=0;runTimer=0;hitReact=false;hitT=0;hitAnim=0;
-  chaserSwing=false;chaserSwingT=0;gameRunning=true;
-  spaceHeld=false;touchHeld=false;gap=170;chaserX=RX-gap;
-  isJumping=false;jumpVY=0;jumpY=0;lastTapTime=0;
-  runnerBaseX=RX;runnerState='normal';runnerStateTimer=60;
-  runnerSpeedMult=1;runnerDucking=false;runnerDuckTimer=0;
-  runnerTaunting=false;runnerTauntMsg='';runnerStumble=false;
-  sv.textContent='0';cd.style.display='none';os.style.display='none';
-}
-
-function isHolding(){return spaceHeld||touchHeld;}
-
-function triggerJump(){
-  if(!isJumping&&gameRunning){
-    isJumping=true;jumpVY=JUMP_POWER;
-  }
-}
-
-const TAUNTS=['CAN\'T CATCH ME!','TOO SLOW!','HAHA!','NOPE!','OVER HERE!','MISSED ME!','LOL','EZ'];
-
-function tryBonk(){
-  if(!gameRunning)return;
-  if(gap>HIT_ZONE){doMiss();return;}
-  // Jump bonk while runner is ducking = whiff!
-  if(isJumping&&runnerDucking){
-    bonkTexts.push({text:'DUCKED!',x:RX,y:GROUND-110,life:0.8,size:28,color:'#9b59b6'});
-    bonkTexts.push({text:'whiff...',x:chaserX+20,y:GROUND-80,life:0.6,size:16,color:C.miss});
-    combo=0;cd.style.display='none';
-    return;
-  }
-  doBoink();
-}
-
-function doBoink(){
-  // Distance scoring: closer = more points (1-5 base)
-  const closeness=1-Math.max(0,Math.min(1,(gap-MIN_GAP)/(HIT_ZONE-MIN_GAP)));
-  let pts=Math.ceil(closeness*5);
-  let bonkLabel='BONK!';
-  let bonkSize=26;
-  let bonkCol='#e24b4a';
-
-  // Jump bonus: 2x multiplier (but risky - can whiff on duck)
-  const jumpBonus=isJumping;
-  if(jumpBonus)pts*=2;
-
-  // Bonus for hitting during stumble
-  const stumbleBonus=runnerStumble;
-  if(stumbleBonus)pts+=3;
-
-  if(closeness>0.9){bonkLabel=jumpBonus?'AIR PERFECT!!!':'PERFECT!!';bonkSize=42;bonkCol='#f7c948';}
-  else if(closeness>0.7){bonkLabel=jumpBonus?'AIR SMASH!!':'GREAT!';bonkSize=36;bonkCol='#1D9E75';}
-  else if(closeness>0.4){bonkLabel=jumpBonus?'JUMP BONK!':'BONK!';bonkSize=30;bonkCol='#BA7517';}
-  else {bonkLabel=jumpBonus?'AIR TAP':'bonk';bonkSize=24;bonkCol='#e24b4a';}
-
-  combo++;
-  const comboMult=Math.min(combo,5);
-  const totalPts=pts*(combo>=2?comboMult:1);
-  score+=totalPts;
-
-  bonkTexts.push({text:bonkLabel,x:RX,y:GROUND-100+jumpY,life:1,size:bonkSize,color:bonkCol});
-  bonkTexts.push({text:'+'+totalPts,x:RX,y:GROUND-120+jumpY,life:1,size:20,color:'#fff'});
-  if(jumpBonus)bonkTexts.push({text:'AERIAL!',x:chaserX+20,y:GROUND-140+jumpY,life:0.8,size:18,color:'#9b59b6'});
-  if(stumbleBonus)bonkTexts.push({text:'WHILE DOWN!',x:RX+30,y:GROUND-145+jumpY,life:0.8,size:16,color:'#e67e22'});
-  if(combo>=2)bonkTexts.push({text:'x'+comboMult+' COMBO',x:RX-30,y:GROUND-80,life:0.7,size:14,color:'#1D9E75'});
-  const cry=FUNNY[Math.floor(Math.random()*FUNNY.length)];
-  bonkTexts.push({text:cry,x:RX+20,y:GROUND-135+jumpY,life:1,size:16,color:'#e24b4a',wobble:true});
-  spawnParticles(RX,GROUND-50+jumpY);spawnFloaties(RX,GROUND-70+jumpY);
-  hitReact=true;hitT=38;hitAnim=(hitAnim+1)%4;
-  chaserSwing=true;chaserSwingT=24;shakeT=closeness>0.8?18:12;
-  sv.textContent=score;
-  if(combo>=2){cd.style.display='block';cv.textContent='x'+comboMult;}
-  if(score>best){best=score;bv.textContent=best;}
-  spd=Math.min(spd+0.09,6);gap=Math.min(gap+100,220);
-  // Interrupt runner states on hit
-  runnerState='normal';runnerStateTimer=30;runnerTaunting=false;runnerStumble=false;runnerDucking=false;
-}
-
-function doMiss(){
-  if(combo>0)bonkTexts.push({text:'too far...',x:chaserX+30,y:GROUND-80,life:0.8,size:14,color:C.miss});
-  combo=0;cd.style.display='none';
-}
-
-function spawnParticles(x,y){
-  for(let i=0;i<14;i++)
-    particles.push({x,y,vx:(Math.random()-0.5)*11,vy:-Math.random()*8-2,life:1,size:Math.random()*6+2,col:Math.random()<0.5?'#e24b4a':'#f7c948'});
-}
-function spawnFloaties(x,y){
-  const em=['★','★','💧','💧','💫','✦','~','~'];
-  for(let i=0;i<8;i++){
-    const a=Math.random()*Math.PI*2;
-    floaties.push({x,y:y-10,vx:Math.cos(a)*4+(Math.random()-0.5)*3,vy:Math.sin(a)*4-3,life:1,char:em[i],size:14+Math.random()*8,rot:Math.random()*6});
-  }
-}
-
-function drawBg(){
-  ctx.fillStyle=C.sky;ctx.fillRect(0,0,W,GROUND);
-  ctx.fillStyle=C.cloud;
-  for(let i=0;i<4;i++){
-    const cx2=((i*210-bgX*0.25)%(W+160)+W+160)%(W+160)-80,cy=32+(i%2)*26;
-    ctx.beginPath();ctx.ellipse(cx2,cy,38,16,0,0,Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.ellipse(cx2-22,cy+6,26,13,0,0,Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.ellipse(cx2+22,cy+6,26,13,0,0,Math.PI*2);ctx.fill();
-  }
-  ctx.fillStyle=C.ground;ctx.fillRect(0,GROUND,W,H-GROUND);
-  ctx.strokeStyle=C.gl;ctx.lineWidth=1;
-  for(let i=0;i<22;i++){
-    const lx=((i*75-bgX*1.5)%W+W)%W;
-    ctx.beginPath();ctx.moveTo(lx,GROUND);ctx.lineTo(lx-18,H);ctx.stroke();
-  }
-}
-
+// ─── Runner (target) ────────────────────────────────────────────────────────
 function drawRunnerBody(x,y,frame,hitAn){
   const lo=frame===0?9:-9,ao=frame===0?7:-7;
   ctx.strokeStyle=C.rb;ctx.lineWidth=3;ctx.lineCap='round';
@@ -352,21 +200,209 @@ function drawRunnerBody(x,y,frame,hitAn){
   }
 }
 
-function drawProxBar(){
-  const bW=180,bH=10,bx=W/2-90,by=14;
-  const pct=Math.max(0,Math.min(1,(200-gap)/(200-MIN_GAP)));
+// ─── Box drawing ────────────────────────────────────────────────────────────
+function drawBox(x,y,w,h){
+  ctx.fillStyle=C.box;
+  ctx.fillRect(x,y,w,h);
+  ctx.fillStyle=C.boxDark;
+  ctx.fillRect(x,y,w,3);
+  ctx.fillRect(x,y,3,h);
+  ctx.fillStyle=C.boxLight;
+  ctx.fillRect(x+w-3,y,3,h);
+  ctx.fillRect(x,y+h-3,w,3);
+  // Wood grain
+  ctx.strokeStyle='rgba(0,0,0,0.15)';ctx.lineWidth=1;
+  for(let i=1;i<3;i++){
+    ctx.beginPath();ctx.moveTo(x+4,y+i*(h/3));ctx.lineTo(x+w-4,y+i*(h/3));ctx.stroke();
+  }
+  // Cross marks
+  ctx.strokeStyle='rgba(0,0,0,0.2)';ctx.lineWidth=1.5;
+  const cx=x+w/2,cy=y+h/2;
+  ctx.beginPath();ctx.moveTo(cx-6,cy-6);ctx.lineTo(cx+6,cy+6);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx+6,cy-6);ctx.lineTo(cx-6,cy+6);ctx.stroke();
+}
+
+// ─── Title screen ───────────────────────────────────────────────────────────
+function drawTitleScreen(){
+  const tw=340,th=155;
+  tctx.clearRect(0,0,tw,th);
+  tctx.fillStyle=C.sky;tctx.fillRect(0,0,tw,th);
+  tctx.fillStyle=C.ground;tctx.fillRect(0,th-28,tw,28);
+  const rx2=235,cx2=105;
+  const lo=titleFrame===0?7:-7,ao=titleFrame===0?5:-5;
+  tctx.strokeStyle=C.rb;tctx.lineWidth=2.5;tctx.lineCap='round';
+  tctx.beginPath();tctx.moveTo(rx2,th-28);tctx.lineTo(rx2+lo,th-28);tctx.stroke();
+  tctx.beginPath();tctx.moveTo(rx2,th-28);tctx.lineTo(rx2-lo,th-28);tctx.stroke();
+  tctx.beginPath();tctx.moveTo(rx2,th-28);tctx.lineTo(rx2,th-46);tctx.stroke();
+  tctx.beginPath();tctx.moveTo(rx2-9,th-37+ao);tctx.lineTo(rx2+9,th-37-ao);tctx.stroke();
+  tctx.fillStyle=C.skin;tctx.beginPath();tctx.arc(rx2,th-54,9,0,Math.PI*2);tctx.fill();
+  tctx.strokeStyle=C.rb;tctx.lineWidth=2;tctx.stroke();
+  tctx.fillStyle='#555';tctx.fillRect(rx2-4,th-57,3,2);tctx.fillRect(rx2+1,th-57,3,2);
+  // Draw a box being thrown
+  tctx.fillStyle=C.box;tctx.fillRect(160,th-50,20,20);
+  tctx.fillStyle=C.boxDark;tctx.fillRect(160,th-50,20,2);
+  drawCartmanOnCtx(tctx,cx2,th-28,0.55,true,true);
+  tctx.font='bold 14px monospace';tctx.textAlign='center';tctx.fillStyle=C.bonk;
+  tctx.fillText('HIT HIM WITH A STICK',170,18);
+}
+
+function animateTitleScreen(){
+  titleTimer++;if(titleTimer>14){titleFrame=1-titleFrame;titleTimer=0;}
+  drawTitleScreen();
+  if(onTitleScreen)requestAnimationFrame(animateTitleScreen);
+}
+
+// ─── Game init ──────────────────────────────────────────────────────────────
+function startGame(){
+  onTitleScreen=false;
+  pName=(nameInput.value.trim()||'VICTIM').toUpperCase();
+  nameInput.blur();
+  ns.style.display='none';gu.style.display='block';
+  initGame();gameLoop();
+}
+
+function initGame(){
+  score=0;combo=0;bgX=0;spd=3;shakeT=0;
+  bonkTexts=[];particles=[];floaties=[];
+  runFrame=0;runTimer=0;hitReact=false;hitT=0;hitAnim=0;
+  chaserSwing=false;chaserSwingT=0;gameRunning=true;
+  isJumping=false;jumpVY=0;jumpY=0;
+  gap=500;runnerX=CX+gap;
+  runnerState='normal';runnerStateTimer=60;runnerSpeedMult=1;
+  runnerTaunting=false;runnerTauntMsg='';runnerStumble=false;stumbleTimer=0;
+  boxes=[];boxTimer=0;boxInterval=90;
+  sv.textContent='0';cd.style.display='none';os.style.display='none';
+}
+
+// ─── Jump ───────────────────────────────────────────────────────────────────
+function triggerJump(){
+  if(!isJumping&&gameRunning){
+    isJumping=true;jumpVY=JUMP_POWER;
+  }
+}
+
+// ─── Obstacle spawning ─────────────────────────────────────────────────────
+function spawnBox(){
+  const difficulty=Math.min(score*0.03,1);
+  const r=Math.random();
+  let bw,bh;
+  if(r<0.5){bw=30;bh=30;} // small
+  else if(r<0.8){bw=30;bh=50;} // tall
+  else {bw=50;bh=30;} // wide
+
+  // Thrown from runner position
+  const throwLine=THROW_LINES[Math.floor(Math.random()*THROW_LINES.length)];
+  bonkTexts.push({text:throwLine,x:runnerX,y:GROUND-100,life:0.5,size:14,color:'#e67e22',wobble:false});
+
+  boxes.push({
+    x:runnerX-20,
+    y:GROUND-bh,
+    w:bw,h:bh,
+    vx:-(4+spd+difficulty*3), // speed toward Cartman
+    active:true
+  });
+}
+
+// ─── Collision ──────────────────────────────────────────────────────────────
+function checkBoxCollision(box){
+  if(!box.active)return false;
+  // Cartman hitbox (rough): CX-18 to CX+18, chaserY-80 to chaserY
+  const chaserY=GROUND+jumpY;
+  const cartLeft=CX-18,cartRight=CX+18;
+  const cartTop=chaserY-80,cartBot=chaserY;
+  const boxLeft=box.x,boxRight=box.x+box.w;
+  const boxTop=box.y,boxBot=box.y+box.h;
+  return cartRight>boxLeft&&cartLeft<boxRight&&cartBot>boxTop&&cartTop<boxBot;
+}
+
+// ─── Bonk (auto when close enough) ─────────────────────────────────────────
+function doBoink(){
+  const closeness=Math.max(0,Math.min(1,1-(gap-50)/(HIT_ZONE-50)));
+  let pts=Math.ceil(closeness*5)+1;
+  let bonkLabel='BONK!';
+  let bonkSize=28;
+  let bonkCol='#e24b4a';
+
+  if(closeness>0.9){bonkLabel='PERFECT!!';bonkSize=42;bonkCol='#f7c948';}
+  else if(closeness>0.6){bonkLabel='GREAT!';bonkSize=36;bonkCol='#1D9E75';}
+  else if(closeness>0.3){bonkLabel='BONK!';bonkSize=30;bonkCol='#BA7517';}
+
+  combo++;
+  const comboMult=Math.min(combo,5);
+  const totalPts=pts*(combo>=2?comboMult:1);
+  score+=totalPts;
+
+  bonkTexts.push({text:bonkLabel,x:runnerX,y:GROUND-110,life:1,size:bonkSize,color:bonkCol});
+  bonkTexts.push({text:'+'+totalPts,x:runnerX,y:GROUND-130,life:1,size:20,color:'#fff'});
+  if(combo>=2)bonkTexts.push({text:'x'+comboMult+' COMBO',x:runnerX-40,y:GROUND-90,life:0.7,size:14,color:'#1D9E75'});
+  const cry=FUNNY[Math.floor(Math.random()*FUNNY.length)];
+  bonkTexts.push({text:cry,x:runnerX+20,y:GROUND-145,life:1,size:16,color:'#e24b4a',wobble:true});
+
+  spawnParticles(runnerX,GROUND-50);spawnFloaties(runnerX,GROUND-70);
+  hitReact=true;hitT=38;hitAnim=(hitAnim+1)%4;
+  chaserSwing=true;chaserSwingT=24;shakeT=closeness>0.8?18:12;
+  sv.textContent=score;
+  if(combo>=2){cd.style.display='block';cv.textContent='x'+comboMult;}
+  if(score>best){best=score;bv.textContent=best;}
+
+  // After bonk: runner runs away, speed up
+  gap=400+Math.random()*100;
+  spd=Math.min(spd+0.15,8);
+  boxInterval=Math.max(35,boxInterval-3);
+  runnerState='normal';runnerStateTimer=40;
+  runnerTaunting=false;runnerStumble=false;
+}
+
+function onBoxHit(){
+  combo=0;cd.style.display='none';
+  gap+=60+Math.random()*30;
+  shakeT=8;
+  bonkTexts.push({text:'OUCH!',x:CX,y:GROUND-100+jumpY,life:0.7,size:22,color:'#e24b4a'});
+  bonkTexts.push({text:'*stumbles*',x:CX+20,y:GROUND-75+jumpY,life:0.5,size:14,color:C.miss});
+  // Cartman stumble: brief slow
+  stumbleTimer=30;
+}
+
+// ─── Effects ────────────────────────────────────────────────────────────────
+function spawnParticles(x,y){
+  for(let i=0;i<14;i++)
+    particles.push({x,y,vx:(Math.random()-0.5)*11,vy:-Math.random()*8-2,life:1,size:Math.random()*6+2,col:Math.random()<0.5?'#e24b4a':'#f7c948'});
+}
+function spawnFloaties(x,y){
+  const em=['★','★','💧','💧','💫','✦','~','~'];
+  for(let i=0;i<8;i++){
+    const a=Math.random()*Math.PI*2;
+    floaties.push({x,y:y-10,vx:Math.cos(a)*4+(Math.random()-0.5)*3,vy:Math.sin(a)*4-3,life:1,char:em[i],size:14+Math.random()*8,rot:Math.random()*6});
+  }
+}
+
+function drawBg(){
+  ctx.fillStyle=C.sky;ctx.fillRect(0,0,W,GROUND);
+  ctx.fillStyle=C.cloud;
+  for(let i=0;i<5;i++){
+    const cx2=((i*210-bgX*0.25)%(W+160)+W+160)%(W+160)-80,cy=32+(i%2)*26;
+    ctx.beginPath();ctx.ellipse(cx2,cy,38,16,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(cx2-22,cy+6,26,13,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(cx2+22,cy+6,26,13,0,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle=C.ground;ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.strokeStyle=C.gl;ctx.lineWidth=1;
+  for(let i=0;i<28;i++){
+    const lx=((i*75-bgX*1.5)%W+W)%W;
+    ctx.beginPath();ctx.moveTo(lx,GROUND);ctx.lineTo(lx-18,H);ctx.stroke();
+  }
+}
+
+function drawGapBar(){
+  const bW=200,bH=10,bx=W/2-100,by=14;
+  const maxGap=550,pct=Math.max(0,Math.min(1,1-gap/maxGap));
   ctx.fillStyle='rgba(0,0,0,0.12)';ctx.beginPath();ctx.roundRect(bx,by,bW,bH,5);ctx.fill();
   const inRange=gap<=HIT_ZONE;
   ctx.fillStyle=inRange?C.bonk:C.spbar;
   ctx.beginPath();ctx.roundRect(bx,by,bW*pct,bH,5);ctx.fill();
   ctx.font='9px monospace';ctx.textAlign='center';
   ctx.fillStyle=inRange?C.bonk:C.muted;
-  let label='HOLD TO SPRINT';
-  if(isJumping&&inRange)label=runnerDucking?'THEY DUCKED! DON\'T JUMP!':'RELEASE FOR AIR BONK!';
-  else if(inRange)label='RELEASE TO BONK!';
-  else if(isJumping)label='JUMPING...';
-  else if(runnerTaunting)label='THEY\'RE TAUNTING! GO!';
-  else if(runnerStumble)label='THEY STUMBLED! NOW!';
+  const label=inRange?'BONK RANGE!':'CLOSING IN...';
   ctx.fillText(label,W/2,by+bH+13);
 }
 
@@ -401,76 +437,58 @@ function updateBonkTexts(){
   ctx.globalAlpha=1;
 }
 
+// ─── Runner AI ──────────────────────────────────────────────────────────────
 function updateRunnerAI(){
-  const difficulty=Math.min(score*0.02,1); // 0-1 scaling with score
+  const difficulty=Math.min(score*0.03,1);
   runnerStateTimer--;
-
   if(runnerStateTimer<=0){
-    // Pick new state based on gap
     const r=Math.random();
-    if(gap<100){
-      // Close: panic sprint or duck
-      if(r<0.5+difficulty*0.2){
-        runnerState='panic';runnerStateTimer=30+Math.floor(Math.random()*30);
-        runnerSpeedMult=2+difficulty;
-        bonkTexts.push({text:'?!',x:RX,y:GROUND-105,life:0.5,size:22,color:'#e24b4a'});
-      } else if(r<0.7+difficulty*0.15){
-        runnerState='duck';runnerStateTimer=20+Math.floor(Math.random()*20);
-        runnerDucking=true;runnerSpeedMult=0.3;
-        bonkTexts.push({text:'*ducks*',x:RX,y:GROUND-90,life:0.5,size:14,color:'#9b59b6'});
-      } else {
-        runnerState='normal';runnerStateTimer=20+Math.floor(Math.random()*30);
-        runnerSpeedMult=1+Math.random()*0.5;
-      }
-    } else if(gap>160){
-      // Far: taunt or stumble
-      if(r<0.35){
-        runnerState='taunt';runnerStateTimer=50+Math.floor(Math.random()*40);
-        runnerTaunting=true;runnerSpeedMult=0.2;
+    if(gap<200){
+      // Close: run faster
+      runnerState='panic';runnerStateTimer=40+Math.floor(Math.random()*30);
+      runnerSpeedMult=1.5+difficulty;
+      bonkTexts.push({text:'?!',x:runnerX,y:GROUND-105,life:0.5,size:22,color:'#e24b4a'});
+    } else if(gap>400){
+      if(r<0.4){
+        runnerState='taunt';runnerStateTimer=60+Math.floor(Math.random()*40);
+        runnerTaunting=true;runnerSpeedMult=0.1;
         runnerTauntMsg=TAUNTS[Math.floor(Math.random()*TAUNTS.length)];
-        bonkTexts.push({text:runnerTauntMsg,x:RX,y:GROUND-105,life:0.8,size:16,color:'#3498db',wobble:true});
-      } else if(r<0.5-difficulty*0.1){
-        runnerState='stumble';runnerStateTimer=25+Math.floor(Math.random()*15);
-        runnerStumble=true;runnerSpeedMult=0.05;
-        bonkTexts.push({text:'*stumbles*',x:RX,y:GROUND-90,life:0.6,size:16,color:'#e67e22'});
+        bonkTexts.push({text:runnerTauntMsg,x:runnerX,y:GROUND-105,life:0.8,size:16,color:'#3498db',wobble:true});
+      } else if(r<0.55){
+        runnerState='stumble';runnerStateTimer=35+Math.floor(Math.random()*20);
+        runnerStumble=true;runnerSpeedMult=0;
+        bonkTexts.push({text:'*trips*',x:runnerX,y:GROUND-90,life:0.6,size:16,color:'#e67e22'});
       } else {
-        runnerState='normal';runnerStateTimer=30+Math.floor(Math.random()*40);
-        runnerSpeedMult=0.8+Math.random()*0.6;
+        runnerState='normal';runnerStateTimer=30+Math.floor(Math.random()*30);
+        runnerSpeedMult=0.5+Math.random()*0.5;
       }
     } else {
-      // Mid range: variable speed
-      runnerState='normal';runnerStateTimer=20+Math.floor(Math.random()*30);
-      runnerSpeedMult=0.6+Math.random()*1.0;
-      // Occasional random speed burst
-      if(r<0.15+difficulty*0.1){
-        runnerSpeedMult=1.8+difficulty*0.5;
-        bonkTexts.push({text:'!',x:RX,y:GROUND-100,life:0.4,size:18,color:'#f7c948'});
-      }
+      runnerState='normal';runnerStateTimer=25+Math.floor(Math.random()*30);
+      runnerSpeedMult=0.5+Math.random()*0.8;
     }
   }
-
-  // End duck/taunt/stumble when timer expires
-  if(runnerStateTimer<=3){
-    runnerDucking=false;runnerTaunting=false;runnerStumble=false;
-  }
-
-  // Runner speed affects gap: runner pulls away based on their speed multiplier
-  const runnerPull=runnerSpeedMult*0.4;
-  gap+=runnerPull;
+  if(runnerStateTimer<=3){runnerTaunting=false;runnerStumble=false;}
 }
 
+// ─── Game loop ──────────────────────────────────────────────────────────────
 function gameLoop(){
   if(!gameRunning)return;
   bgX+=spd;
 
-  // Cartman sprint: hold to close gap
-  if(isHolding()){gap-=(5.5+spd*0.5);}else{gap+=0.3+spd*0.1;}
+  // Cartman auto-closes gap (slower when stumbling)
+  const closeRate=stumbleTimer>0?0.3:1.5+spd*0.2;
+  gap-=closeRate;
 
-  // Runner AI
+  // Runner AI pulls away
   updateRunnerAI();
+  const runnerPull=runnerSpeedMult*0.6;
+  gap+=runnerPull;
 
-  gap=Math.max(MIN_GAP,Math.min(280,gap));
-  chaserX=RX-gap;
+  gap=Math.max(40,Math.min(600,gap));
+  runnerX=CX+gap;
+
+  // Stumble recovery
+  if(stumbleTimer>0)stumbleTimer--;
 
   // Jump physics
   if(isJumping){
@@ -478,99 +496,107 @@ function gameLoop(){
     if(jumpY>=0){jumpY=0;jumpVY=0;isJumping=false;}
   }
 
+  // Box spawning
+  boxTimer++;
+  if(boxTimer>=boxInterval){
+    boxTimer=0;
+    spawnBox();
+  }
+
+  // Update boxes
+  boxes.forEach(b=>{
+    b.x+=b.vx;
+    if(b.active&&checkBoxCollision(b)){
+      b.active=false;
+      onBoxHit();
+    }
+  });
+  boxes=boxes.filter(b=>b.x+b.w>-50);
+
+  // Auto-bonk when in range
+  if(gap<=HIT_ZONE&&!hitReact){
+    doBoink();
+  }
+
+  // Animation
   runTimer++;
-  const animSpd=runnerStumble?30:(runnerTaunting?20:(isHolding()?7:13));
+  const animSpd=runnerStumble?30:(runnerTaunting?20:8);
   if(runTimer>animSpd){runFrame=1-runFrame;runTimer=0;}
   if(hitT>0)hitT--;if(hitT===0){hitReact=false;}
   if(chaserSwingT>0)chaserSwingT--;if(chaserSwingT===0)chaserSwing=false;
   if(shakeT>0)shakeT--;
 
+  // ─── Draw ───────────────────────────────────────────────────────────────
   ctx.save();
   if(shakeT>0)ctx.translate((Math.random()-0.5)*8,(Math.random()-0.5)*5);
   ctx.clearRect(0,0,W,H);
-  drawBg();drawProxBar();
+  drawBg();
+  drawGapBar();
   updateParticles();updateFloaties();
 
+  // Draw boxes
+  boxes.forEach(b=>{
+    if(b.active)drawBox(b.x,b.y,b.w,b.h);
+    else {
+      // Broken box fragments
+      ctx.globalAlpha=0.4;
+      drawBox(b.x,b.y+5,b.w*0.6,b.h*0.6);
+      ctx.globalAlpha=1;
+    }
+  });
+
   // Draw runner
-  const rx=RX+(hitReact?14:0);
   const ry=GROUND;
-  const duckOffset=runnerDucking?12:0;
+  if(runnerX<W+50){
+    ctx.font='bold 13px monospace';ctx.textAlign='center';
+    ctx.fillStyle=hitReact?C.bonk:(runnerTaunting?'#3498db':(runnerStumble?'#e67e22':C.txt));
+    ctx.fillText(pName.toUpperCase(),runnerX,ry-88);
 
-  ctx.font='bold 13px monospace';ctx.textAlign='center';
-  ctx.fillStyle=hitReact?C.bonk:(runnerTaunting?'#3498db':(runnerStumble?'#e67e22':C.txt));
-  ctx.fillText(pName.toUpperCase(),rx,ry-88+duckOffset);
-
-  if(runnerDucking){
-    // Draw ducking runner (crouched)
-    ctx.strokeStyle=C.rb;ctx.lineWidth=3;ctx.lineCap='round';
-    ctx.beginPath();ctx.moveTo(rx-10,ry);ctx.lineTo(rx+10,ry);ctx.stroke(); // legs spread
-    ctx.beginPath();ctx.moveTo(rx,ry);ctx.lineTo(rx,ry-20);ctx.stroke(); // short body
-    ctx.beginPath();ctx.moveTo(rx-10,ry-15);ctx.lineTo(rx+10,ry-15);ctx.stroke(); // arms out
-    ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(rx,ry-28,9,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle=C.rb;ctx.lineWidth=2;ctx.stroke();
-    ctx.fillStyle='#555';ctx.fillRect(rx-4,ry-31,3,2);ctx.fillRect(rx+1,ry-31,3,2);
-  } else if(runnerStumble){
-    // Draw stumbling runner (falling forward)
-    ctx.strokeStyle=C.rb;ctx.lineWidth=3;ctx.lineCap='round';
-    ctx.beginPath();ctx.moveTo(rx-5,ry);ctx.lineTo(rx+15,ry-25);ctx.stroke(); // leaning body
-    ctx.beginPath();ctx.moveTo(rx+10,ry-18);ctx.lineTo(rx+25,ry-10);ctx.stroke(); // arm out
-    ctx.beginPath();ctx.moveTo(rx+10,ry-18);ctx.lineTo(rx-5,ry-25);ctx.stroke(); // other arm
-    ctx.beginPath();ctx.moveTo(rx-5,ry);ctx.lineTo(rx-12,ry+2);ctx.stroke(); // back leg
-    ctx.beginPath();ctx.moveTo(rx-5,ry);ctx.lineTo(rx+8,ry+2);ctx.stroke(); // front leg
-    ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(rx+18,ry-32,9,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle=C.rb;ctx.lineWidth=2;ctx.stroke();
-    ctx.fillStyle='#555';ctx.fillRect(rx+15,ry-35,3,2);ctx.fillRect(rx+20,ry-35,3,2);
-  } else if(runnerTaunting){
-    // Draw taunting runner (looking back)
-    drawRunnerBody(rx,ry,runFrame,0);
-    // Draw look-back indicator
-    ctx.fillStyle='#555';
-    ctx.fillRect(rx-7,ry-61,4,3);ctx.fillRect(rx-2,ry-61,4,3); // eyes looking left (at Cartman)
+    if(runnerStumble){
+      ctx.strokeStyle=C.rb;ctx.lineWidth=3;ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(runnerX-5,ry);ctx.lineTo(runnerX+15,ry-25);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(runnerX+10,ry-18);ctx.lineTo(runnerX+25,ry-10);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(runnerX+10,ry-18);ctx.lineTo(runnerX-5,ry-25);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(runnerX-5,ry);ctx.lineTo(runnerX-12,ry+2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(runnerX-5,ry);ctx.lineTo(runnerX+8,ry+2);ctx.stroke();
+      ctx.fillStyle=C.skin;ctx.beginPath();ctx.arc(runnerX+18,ry-32,9,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle=C.rb;ctx.lineWidth=2;ctx.stroke();
+    } else if(runnerTaunting){
+      drawRunnerBody(runnerX,ry,runFrame,0);
+      ctx.fillStyle='#555';
+      ctx.fillRect(runnerX-7,ry-61,4,3);ctx.fillRect(runnerX-2,ry-61,4,3);
+    } else {
+      drawRunnerBody(runnerX,ry,runFrame,hitReact?hitAnim:0);
+    }
   } else {
-    drawRunnerBody(rx,ry,runFrame,hitReact?hitAnim:0);
+    // Runner off-screen indicator
+    ctx.font='bold 12px monospace';ctx.textAlign='right';
+    ctx.fillStyle=C.bonk;
+    ctx.fillText(pName+' →',W-10,30);
   }
 
-  // Draw Cartman (chaser) with jump offset
+  // Draw Cartman
   const chaserY=GROUND+jumpY;
-  drawCartmanOnCtx(ctx,chaserX,chaserY,1,chaserSwing,chaserSwing);
+  drawCartmanOnCtx(ctx,CX,chaserY,1,chaserSwing,chaserSwing);
 
-  // Jump shadow when airborne
+  // Jump shadow
   if(isJumping){
     ctx.fillStyle='rgba(0,0,0,0.15)';
-    ctx.beginPath();ctx.ellipse(chaserX,GROUND+2,22,6,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(CX,GROUND+2,22,6,0,0,Math.PI*2);ctx.fill();
   }
 
-  // Range indicator line
-  if(gap<=HIT_ZONE+12&&gap>0){
-    const a=Math.max(0,1-(gap-MIN_GAP)/(HIT_ZONE-MIN_GAP+12));
-    ctx.strokeStyle=`rgba(226,75,74,${a*0.45})`;ctx.lineWidth=1;ctx.setLineDash([4,4]);
-    ctx.beginPath();ctx.moveTo(chaserX+22,chaserY-55);ctx.lineTo(rx-16,ry-55+duckOffset);ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Duck warning icon when ducking and in range
-  if(runnerDucking&&gap<HIT_ZONE+30){
-    ctx.font='bold 14px monospace';ctx.textAlign='center';
-    ctx.fillStyle='#9b59b6';
-    ctx.fillText('DUCKING!',RX,GROUND-45);
+  // Stumble indicator
+  if(stumbleTimer>0){
+    ctx.font='bold 12px monospace';ctx.textAlign='center';
+    ctx.fillStyle='rgba(226,75,74,0.6)';
+    ctx.fillText('STUNNED',CX,GROUND+20);
   }
 
   updateBonkTexts();ctx.restore();
   animId=requestAnimationFrame(gameLoop);
 }
 
-// Double-tap detection helper
-function handlePress(){
-  const now=Date.now();
-  if(now-lastTapTime<DOUBLE_TAP_MS){
-    triggerJump();
-    lastTapTime=0; // reset so triple tap doesn't re-trigger
-  } else {
-    lastTapTime=now;
-  }
-}
-
-// Keyboard controls
+// ─── Controls ───────────────────────────────────────────────────────────────
 document.addEventListener('keydown',e=>{
   if(onTitleScreen){
     if(e.key==='Enter')startGame();
@@ -578,29 +604,19 @@ document.addEventListener('keydown',e=>{
   }
   if(e.code==='Space'){
     e.preventDefault();
-    if(!spaceHeld)handlePress(); // detect double-tap on press
-    spaceHeld=true;
+    triggerJump();
   }
   if(e.code==='Enter'&&!gameRunning)rb.click();
 });
-document.addEventListener('keyup',e=>{
-  if(!onTitleScreen&&e.code==='Space'){spaceHeld=false;if(gameRunning)tryBonk();}
-});
 
-// Mouse controls (game canvas)
-canvas.addEventListener('mousedown',()=>{handlePress();touchHeld=true;});
-canvas.addEventListener('mouseup',()=>{touchHeld=false;if(gameRunning)tryBonk();});
+canvas.addEventListener('mousedown',()=>{if(!onTitleScreen)triggerJump();});
 
-// Touch controls - whole document for mobile
 document.addEventListener('touchstart',e=>{
   if(onTitleScreen)return;
   if(!gameRunning){rb.click();e.preventDefault();return;}
-  e.preventDefault();handlePress();touchHeld=true;
+  e.preventDefault();triggerJump();
 },{passive:false});
-document.addEventListener('touchend',e=>{
-  if(onTitleScreen)return;
-  e.preventDefault();touchHeld=false;if(gameRunning)tryBonk();
-},{passive:false});
+
 sb.addEventListener('click',startGame);
 rb.addEventListener('click',()=>{gameRunning=false;initGame();gameLoop();});
 
